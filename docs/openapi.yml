@@ -1,0 +1,916 @@
+openapi: 3.0.3
+info:
+  title: 수강 신청 시스템 API 명세서
+  version: 0.1.0
+  description: |
+    - 라이브클래스 채용 과제 BE-A.<br>
+    강의 개설부터 수강 신청·결제·취소·대기열까지의 백엔드 API 명세.
+
+    - 모든 응답은 `ApiResponse<T>` 래퍼로 통일된다.
+
+      ```jsonc
+      {
+        "success": true,                   // 성공 여부
+        "code": 200,                       // HTTP 상태코드
+        "message": "요청이 성공했습니다.",   // 결과 메시지
+        "data": { /* T */ },               // 실제 응답 데이터, 실패 시 null
+        "error": {                         // success가 true일 시 null, 아래는 예시 데이터
+          "code": 140001,                  // 커스텀 에러 코드
+          "message": "VALIDATION_FAILED",  // 에러 식별 메시지
+          "details": [                     // 검증 실패 시 필드별 배열
+            { "field": "capacity", "reason": "1 이상이어야 합니다." }
+          ]
+        }
+      }
+      ```
+
+    - 인증 컨텍스트가 필요한 요청은 HTTP Header `X-User-Id`(외부 식별자) / `X-User-Role`(역할)로 사용자 식별. 정식 인증 인프라 도입 시 컨트롤러 시그니처 변경 없이 전환 가능하도록 헤더에서 컨텍스트를 받는 형태로 통일했다. (공개 목록·상세 조회 GET은 헤더 미요구.)
+    - 상세 비즈니스 규칙은 README 참조.
+servers:
+  - url: http://localhost:8080
+    description: 로컬 개발 서버
+tags:
+  - name: Course
+    description: 강의 등록·조회·상태 변경, 강의별 수강생 조회
+  - name: Enrollment
+    description: 수강 신청(대기열 통합)·결제 확정·취소·내 신청 목록
+
+paths:
+  /courses:
+    post:
+      tags: [Course]
+      summary: 강의 등록 (DRAFT 생성)
+      description: |
+        크리에이터(`ROLE_CREATOR`)가 강의 정보를 임시저장한다. 생성 시점에 강의 ID가 부여되며 상태는 `DRAFT`로 시작한다.
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+        - $ref: '#/components/parameters/UserRoleParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseCreateRequest'
+            example:
+              title: Spring Boot 입문
+              description: 신규 백엔드 개발자를 위한 8주 커리큘럼
+              price: 49000
+              capacity: 30
+              startDate: '2026-06-01T10:00:00Z'
+              endDate: '2026-07-31T18:00:00Z'
+      responses:
+        '201':
+          description: DRAFT 강의 생성 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  code: { type: integer, example: 201 }
+                  message: { type: string, example: 요청이 성공했습니다. }
+                  data: { $ref: '#/components/schemas/CourseDetailResponse' }
+                  error: { type: object, nullable: true, example: null }
+              example:
+                success: true
+                code: 201
+                message: 강의가 생성되었습니다.
+                data:
+                  id: 1
+                  creatorId: creator-001
+                  title: Spring Boot 입문
+                  description: 신규 백엔드 개발자를 위한 8주 커리큘럼
+                  price: 49000
+                  capacity: 30
+                  enrolledCount: 0
+                  waitingCount: 0
+                  startDate: '2026-06-01T10:00:00Z'
+                  endDate: '2026-07-31T18:00:00Z'
+                  status: DRAFT
+                  createdAt: '2026-05-22T14:15:00Z'
+                  updatedAt: '2026-05-22T14:15:00Z'
+                error: null
+        '400': { $ref: '#/components/responses/BadRequest400' }
+        '403': { $ref: '#/components/responses/Forbidden403' }
+    get:
+      tags: [Course]
+      summary: 강의 목록 조회
+      description: |
+        강의 목록을 페이지네이션으로 조회한다. `status` 파라미터로 필터링하며 기본은 `OPEN`+`CLOSED`. `DRAFT`는 제외.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: 강의 상태 필터 (다중 가능). 미지정 시 `OPEN`+`CLOSED`.
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/CourseStatus'
+          example: [OPEN, CLOSED]
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/SortParam'
+      responses:
+        '200':
+          description: 강의 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  code: { type: integer, example: 200 }
+                  message: { type: string, example: 요청이 성공했습니다. }
+                  data: { $ref: '#/components/schemas/PageCourseSummary' }
+                  error: { type: object, nullable: true, example: null }
+              example:
+                success: true
+                code: 200
+                message: 강의 목록 조회에 성공했습니다.
+                data:
+                  content:
+                    - id: 1
+                      title: Spring Boot 입문
+                      price: 49000
+                      capacity: 30
+                      enrolledCount: 12
+                      waitingCount: 0
+                      startDate: '2026-06-01T10:00:00Z'
+                      endDate: '2026-07-31T18:00:00Z'
+                      status: OPEN
+                  page: 0
+                  size: 20
+                  totalElements: 1
+                  totalPages: 1
+                error: null
+
+  /courses/{courseId}:
+    put:
+      tags: [Course]
+      summary: 강의 정보 수정 (DRAFT만)
+      description: |
+        `DRAFT` 상태의 강의를 전체 교체한다. `OPEN`/`CLOSED` 상태에서는 거부(409).
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+        - $ref: '#/components/parameters/UserRoleParam'
+        - $ref: '#/components/parameters/CourseIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseCreateRequest'
+      responses:
+        '200':
+          description: 강의 수정 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  code: { type: integer, example: 200 }
+                  message: { type: string, example: 요청이 성공했습니다. }
+                  data: { $ref: '#/components/schemas/CourseDetailResponse' }
+                  error: { type: object, nullable: true, example: null }
+        '400': { $ref: '#/components/responses/BadRequest400' }
+        '403': { $ref: '#/components/responses/Forbidden403' }
+        '404': { $ref: '#/components/responses/NotFound404' }
+        '409': { $ref: '#/components/responses/Conflict409' }
+    get:
+      tags: [Course]
+      summary: 강의 상세 조회
+      description: |
+        특정 강의의 상세 정보를 반환한다. 현재 신청 인원(`PENDING+CONFIRMED`)과 대기 인원이 포함된다.
+      parameters:
+        - $ref: '#/components/parameters/CourseIdPath'
+      responses:
+        '200':
+          description: 강의 상세 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  code: { type: integer, example: 200 }
+                  message: { type: string, example: 요청이 성공했습니다. }
+                  data: { $ref: '#/components/schemas/CourseDetailResponse' }
+                  error: { type: object, nullable: true, example: null }
+        '404': { $ref: '#/components/responses/NotFound404' }
+
+  /courses/{courseId}/status:
+    patch:
+      tags: [Course]
+      summary: 강의 상태 변경 (오픈·마감)
+      description: |
+        크리에이터가 자신의 강의를 오픈(`DRAFT → OPEN`) 또는 마감(`OPEN → CLOSED`)한다.
+        종료일 경과 자동 마감은 스케줄러가 별도로 수행한다.
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+        - $ref: '#/components/parameters/UserRoleParam'
+        - $ref: '#/components/parameters/CourseIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseStatusChangeRequest'
+            example:
+              status: OPEN
+      responses:
+        '200':
+          description: 상태 변경 성공 (변경 후 강의 상세 반환)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  code: { type: integer, example: 200 }
+                  message: { type: string, example: 요청이 성공했습니다. }
+                  data: { $ref: '#/components/schemas/CourseDetailResponse' }
+                  error: { type: object, nullable: true, example: null }
+        '400': { $ref: '#/components/responses/BadRequest400' }
+        '403': { $ref: '#/components/responses/Forbidden403' }
+        '404': { $ref: '#/components/responses/NotFound404' }
+        '409':
+          description: "허용되지 않은 상태 전이 (예: CLOSED → OPEN)"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                code: 409
+                message: 현재 상태에서 요청한 전이가 허용되지 않습니다.
+                data: null
+                error:
+                  code: 240901
+                  message: COURSE_ILLEGAL_TRANSITION
+                  details: null
+
+  /courses/{courseId}/enrollments:
+    get:
+      tags: [Course]
+      summary: 강의별 수강생 목록 조회 (강사용)
+      description: |
+        해당 강의의 `PENDING`/`CONFIRMED` 수강생을 페이지네이션으로 반환한다. 강의 소유 크리에이터만 접근 가능.
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+        - $ref: '#/components/parameters/UserRoleParam'
+        - $ref: '#/components/parameters/CourseIdPath'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/SortParam'
+      responses:
+        '200':
+          description: 수강생 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  code: { type: integer, example: 200 }
+                  message: { type: string, example: 요청이 성공했습니다. }
+                  data: { $ref: '#/components/schemas/PageCourseEnrollmentItem' }
+                  error: { type: object, nullable: true, example: null }
+        '403': { $ref: '#/components/responses/Forbidden403' }
+        '404': { $ref: '#/components/responses/NotFound404' }
+
+  /enrollments:
+    post:
+      tags: [Enrollment]
+      summary: 수강 신청 (대기열 자동 흡수)
+      description: |
+        수강 신청을 한다. 정원에 자리가 있으면 즉시 `PENDING` 신청을 생성(결제 기한 30분 시작),
+        자리가 없으면 자동으로 대기열에 진입한다. 응답의 `resultType`으로 결과를 구분한다.
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+        - $ref: '#/components/parameters/UserRoleParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrollmentCreateRequest'
+            example:
+              courseId: 1
+      responses:
+        '201':
+          description: 신청 또는 대기열 진입 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  code: { type: integer, example: 201 }
+                  message: { type: string, example: 요청이 성공했습니다. }
+                  data: { $ref: '#/components/schemas/EnrollmentCreateResponse' }
+                  error: { type: object, nullable: true, example: null }
+              examples:
+                enrolled:
+                  summary: 정원 내 신청 성공 (PENDING)
+                  value:
+                    success: true
+                    code: 201
+                    message: 신청이 접수되었습니다. 30분 이내 결제해 주세요.
+                    data:
+                      resultType: ENROLLED
+                      enrollmentId: 101
+                      courseId: 1
+                      status: PENDING
+                      paymentDeadline: '2026-05-22T14:45:00Z'
+                      waitlistId: null
+                      waitlistPosition: null
+                    error: null
+                waitlisted:
+                  summary: 대기열 진입
+                  value:
+                    success: true
+                    code: 201
+                    message: 정원이 마감되어 대기열에 진입했습니다.
+                    data:
+                      resultType: WAITLISTED
+                      enrollmentId: null
+                      courseId: 1
+                      status: null
+                      paymentDeadline: null
+                      waitlistId: 55
+                      waitlistPosition: 3
+                    error: null
+        '400': { $ref: '#/components/responses/BadRequest400' }
+        '403': { $ref: '#/components/responses/Forbidden403' }
+        '404': { $ref: '#/components/responses/NotFound404' }
+        '409':
+          description: 신청 거부 (활성 신청 중복, 또는 강의 상태가 `OPEN`이 아님)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                code: 409
+                message: 이미 활성 상태의 수강 신청이 존재합니다.
+                data: null
+                error:
+                  code: 340901
+                  message: DUPLICATE_ACTIVE_ENROLLMENT
+                  details: null
+
+  /enrollments/{enrollmentId}/confirm:
+    post:
+      tags: [Enrollment]
+      summary: 결제 확정
+      description: |
+        본인의 `PENDING` 신청을 `CONFIRMED`로 전이한다. 결제 확정 시각(`confirmedAt`)이 기록되며 이는 7일 환불 기준이 된다.
+        외부 결제 시스템 연동은 본 과제 범위 밖.
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+        - $ref: '#/components/parameters/UserRoleParam'
+        - $ref: '#/components/parameters/EnrollmentIdPath'
+      responses:
+        '200':
+          description: 결제 확정 성공 (전이 후 신청 정보 반환)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  code: { type: integer, example: 200 }
+                  message: { type: string, example: 요청이 성공했습니다. }
+                  data: { $ref: '#/components/schemas/EnrollmentResponse' }
+                  error: { type: object, nullable: true, example: null }
+              example:
+                success: true
+                code: 200
+                message: 결제가 확정되었습니다.
+                data:
+                  enrollmentId: 101
+                  userId: user-001
+                  courseId: 1
+                  status: CONFIRMED
+                  confirmedAt: '2026-05-22T14:30:00Z'
+                  cancelledAt: null
+                  createdAt: '2026-05-22T14:15:00Z'
+                  updatedAt: '2026-05-22T14:30:00Z'
+                error: null
+        '403': { $ref: '#/components/responses/Forbidden403' }
+        '404': { $ref: '#/components/responses/NotFound404' }
+        '409':
+          description: 결제 확정 불가 (`PENDING` 아님, 또는 결제 기한 30분 초과)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                code: 409
+                message: 결제 기한이 만료되어 확정할 수 없습니다.
+                data: null
+                error:
+                  code: 340903
+                  message: PAYMENT_DEADLINE_EXPIRED
+                  details: null
+
+  /enrollments/{enrollmentId}/cancel:
+    post:
+      tags: [Enrollment]
+      summary: 수강 취소
+      description: |
+        본인의 `CONFIRMED` 신청을 `CANCELLED`로 전이한다. 결제 확정 시각으로부터 7일 이내만 허용한다.
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+        - $ref: '#/components/parameters/UserRoleParam'
+        - $ref: '#/components/parameters/EnrollmentIdPath'
+      responses:
+        '200':
+          description: 수강 취소 성공 (전이 후 신청 정보 반환)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  code: { type: integer, example: 200 }
+                  message: { type: string, example: 요청이 성공했습니다. }
+                  data: { $ref: '#/components/schemas/EnrollmentResponse' }
+                  error: { type: object, nullable: true, example: null }
+        '403': { $ref: '#/components/responses/Forbidden403' }
+        '404': { $ref: '#/components/responses/NotFound404' }
+        '409':
+          description: 취소 거부 (`CONFIRMED` 아님, 또는 결제 후 7일 경과)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                code: 409
+                message: 결제 후 7일이 경과하여 수강 취소가 불가합니다.
+                data: null
+                error:
+                  code: 340906
+                  message: REFUND_WINDOW_EXPIRED
+                  details: null
+
+  /enrollments/me:
+    get:
+      tags: [Enrollment]
+      summary: 내 수강 신청 목록 조회
+      description: |
+        본인의 수강 신청 이력을 페이지네이션으로 반환한다 (`PENDING`/`CONFIRMED`/`CANCELLED` 모두 포함).
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+        - $ref: '#/components/parameters/UserRoleParam'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/SortParam'
+      responses:
+        '200':
+          description: 내 신청 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  code: { type: integer, example: 200 }
+                  message: { type: string, example: 요청이 성공했습니다. }
+                  data: { $ref: '#/components/schemas/PageMyEnrollmentItem' }
+                  error: { type: object, nullable: true, example: null }
+
+components:
+  parameters:
+    UserIdParam:
+      name: X-User-Id
+      in: header
+      required: true
+      description: |
+        요청 사용자 외부 식별자(`User.userId`). 인증된 컨텍스트를 헤더로 받는 형태이며, 정식 인증 인프라 미도입 단계에서는 클라이언트가 이 헤더를 직접 채워 보낸다.
+      schema:
+        type: string
+        example: user-001
+    UserRoleParam:
+      name: X-User-Role
+      in: header
+      required: true
+      description: |
+        요청 사용자 역할. `ROLE_USER` 또는 `ROLE_CREATOR`. `X-User-Id`와 짝을 이루는 인증 컨텍스트 헤더.
+      schema:
+        type: string
+        enum: [ROLE_USER, ROLE_CREATOR]
+        example: ROLE_USER
+    CourseIdPath:
+      name: courseId
+      in: path
+      required: true
+      description: 강의 식별자
+      schema:
+        type: integer
+        format: int64
+        example: 1
+    EnrollmentIdPath:
+      name: enrollmentId
+      in: path
+      required: true
+      description: 수강 신청 식별자
+      schema:
+        type: integer
+        format: int64
+        example: 101
+    PageParam:
+      name: page
+      in: query
+      required: false
+      description: 0-based 페이지 번호 (기본 0)
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    SizeParam:
+      name: size
+      in: query
+      required: false
+      description: 페이지 크기 (기본 20, 최대 100)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    SortParam:
+      name: sort
+      in: query
+      required: false
+      description: 정렬 키 (Spring Pageable 형식, 예 `createdAt,desc`). 다중 가능.
+      schema:
+        type: array
+        items:
+          type: string
+      example: ['createdAt,desc']
+
+  responses:
+    BadRequest400:
+      description: 요청 본문 또는 파라미터 검증 실패
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            code: 400
+            message: 요청이 유효하지 않습니다.
+            data: null
+            error:
+              code: 140001
+              message: VALIDATION_FAILED
+              details:
+                - field: capacity
+                  reason: 1 이상이어야 합니다.
+                - field: price
+                  reason: 0 이상이어야 합니다.
+    Forbidden403:
+      description: 권한 없음 (역할 불일치 또는 리소스 소유권 없음)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            code: 403
+            message: 요청 권한이 없습니다.
+            data: null
+            error:
+              code: 140301
+              message: FORBIDDEN
+              details: null
+    NotFound404:
+      description: 리소스 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            code: 404
+            message: 요청한 리소스를 찾을 수 없습니다.
+            data: null
+            error:
+              code: 140401
+              message: RESOURCE_NOT_FOUND
+              details: null
+    Conflict409:
+      description: |
+        상태·비즈니스 규칙 충돌. 실제 `error.code`는 컨텍스트에 따라 달라지므로 `docs/error-codes.md` 참조.
+        아래 예시는 `COURSE_NOT_EDITABLE`(DRAFT 외 강의 수정 시도) 케이스를 대표로 사용했다.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            code: 409
+            message: DRAFT 상태의 강의만 수정할 수 있습니다.
+            data: null
+            error:
+              code: 240902
+              message: COURSE_NOT_EDITABLE
+              details: null
+
+  schemas:
+    # ============ 에러 응답 ============
+    ErrorResponse:
+      type: object
+      description: |
+        실패 응답. `data`는 항상 null, `error`에 상세가 채워진다.
+        `code`는 4xx/5xx 중 해당 상황의 HTTP 상태값(예: 400/403/404/409).
+      properties:
+        success: { type: boolean, example: false }
+        code: { type: integer, example: 400 }
+        message: { type: string, example: 요청이 유효하지 않습니다. }
+        data: { type: object, nullable: true, example: null }
+        error: { $ref: '#/components/schemas/ErrorDetail' }
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+          description: 도메인 에러 식별 정수 (`ErrorCode` enum, `docs/error-codes.md`). 6자리 `D HHH SS` 형태.
+          example: 140001
+        message:
+          type: string
+          description: 에러 식별 메시지 (개발자/QA용 코드 이름)
+          example: VALIDATION_FAILED
+        details:
+          type: array
+          nullable: true
+          description: 검증 오류 시 필드별 상세, 그 외 null
+          items:
+            $ref: '#/components/schemas/FieldError'
+    FieldError:
+      type: object
+      required: [field, reason]
+      properties:
+        field:
+          type: string
+          example: capacity
+        reason:
+          type: string
+          example: 1 이상이어야 합니다.
+
+    # ============ Enum ============
+    CourseStatus:
+      type: string
+      description: |
+        강의 상태. `DRAFT`(초안) → `OPEN`(모집 중) → `CLOSED`(마감).
+        정원이 차도 `OPEN` 유지(대기열 진입 허용).
+      enum: [DRAFT, OPEN, CLOSED]
+    EnrollmentStatus:
+      type: string
+      description: 수강 신청 상태. `PENDING`(결제 대기) → `CONFIRMED`(확정) → `CANCELLED`(취소).
+      enum: [PENDING, CONFIRMED, CANCELLED]
+    EnrollmentResultType:
+      type: string
+      description: |
+        신청 결과 분기. `ENROLLED`=정원 내 신청 성공, `WAITLISTED`=정원 마감으로 대기열 진입.
+      enum: [ENROLLED, WAITLISTED]
+
+    # ============ Course 도메인 ============
+    CourseCreateRequest:
+      type: object
+      required: [title, description, price, capacity, startDate, endDate]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          example: Spring Boot 입문
+        description:
+          type: string
+          minLength: 1
+          example: 신규 백엔드 개발자를 위한 8주 커리큘럼
+        price:
+          type: integer
+          minimum: 0
+          example: 49000
+        capacity:
+          type: integer
+          minimum: 1
+          description: 최대 수강 인원
+          example: 30
+        startDate:
+          type: string
+          format: date-time
+          example: '2026-06-01T10:00:00Z'
+        endDate:
+          type: string
+          format: date-time
+          example: '2026-07-31T18:00:00Z'
+    CourseStatusChangeRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [OPEN, CLOSED]
+          example: OPEN
+          description: |
+            전이 목표 상태. `OPEN`(`DRAFT → OPEN`) 또는 `CLOSED`(`OPEN → CLOSED`)만 허용.
+            `DRAFT`로의 회귀나 잘못된 전이는 409로 거부된다.
+    CourseSummaryResponse:
+      type: object
+      description: 강의 목록 항목. 정원 산정에 따른 인원 카운트 포함.
+      required: [id, title, price, capacity, enrolledCount, waitingCount, startDate, endDate, status]
+      properties:
+        id: { type: integer, format: int64, example: 1 }
+        title: { type: string, example: Spring Boot 입문 }
+        price: { type: integer, example: 49000 }
+        capacity: { type: integer, example: 30 }
+        enrolledCount:
+          type: integer
+          description: 활성 신청 인원 (PENDING + CONFIRMED 합계)
+          example: 12
+        waitingCount:
+          type: integer
+          description: 대기열 인원 수
+          example: 0
+        startDate: { type: string, format: date-time, example: '2026-06-01T10:00:00Z' }
+        endDate: { type: string, format: date-time, example: '2026-07-31T18:00:00Z' }
+        status: { $ref: '#/components/schemas/CourseStatus' }
+    CourseDetailResponse:
+      type: object
+      required:
+        - id
+        - creatorId
+        - title
+        - description
+        - price
+        - capacity
+        - enrolledCount
+        - waitingCount
+        - startDate
+        - endDate
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: integer, format: int64, example: 1 }
+        creatorId:
+          type: string
+          description: 강의 작성자의 외부 식별자(`userId`)
+          example: creator-001
+        title: { type: string, example: Spring Boot 입문 }
+        description: { type: string, example: 신규 백엔드 개발자를 위한 8주 커리큘럼 }
+        price: { type: integer, example: 49000 }
+        capacity: { type: integer, example: 30 }
+        enrolledCount: { type: integer, example: 12 }
+        waitingCount: { type: integer, example: 0 }
+        startDate: { type: string, format: date-time, example: '2026-06-01T10:00:00Z' }
+        endDate: { type: string, format: date-time, example: '2026-07-31T18:00:00Z' }
+        status: { $ref: '#/components/schemas/CourseStatus' }
+        createdAt: { type: string, format: date-time, example: '2026-05-22T14:15:00Z' }
+        updatedAt: { type: string, format: date-time, example: '2026-05-22T14:15:00Z' }
+
+    # ============ Enrollment 도메인 ============
+    EnrollmentCreateRequest:
+      type: object
+      required: [courseId]
+      properties:
+        courseId:
+          type: integer
+          format: int64
+          example: 1
+    EnrollmentCreateResponse:
+      type: object
+      description: |
+        수강 신청 결과. `resultType=ENROLLED`이면 `enrollmentId/status/paymentDeadline`이 채워지고,
+        `resultType=WAITLISTED`이면 `waitlistId/waitlistPosition`이 채워진다. 해당하지 않는 필드는 null.
+      required: [resultType, courseId]
+      properties:
+        resultType: { $ref: '#/components/schemas/EnrollmentResultType' }
+        enrollmentId:
+          type: integer
+          format: int64
+          nullable: true
+          example: 101
+        courseId:
+          type: integer
+          format: int64
+          example: 1
+        status:
+          type: string
+          enum: [PENDING, CONFIRMED, CANCELLED]
+          nullable: true
+          description: ENROLLED 시 PENDING으로 채워지고, WAITLISTED 시 null
+          example: PENDING
+        paymentDeadline:
+          type: string
+          format: date-time
+          nullable: true
+          description: ENROLLED 시 결제 기한 (PENDING 생성 시각 + 30분)
+          example: '2026-05-22T14:45:00Z'
+        waitlistId:
+          type: integer
+          format: int64
+          nullable: true
+          example: 55
+        waitlistPosition:
+          type: integer
+          nullable: true
+          description: 1-based 순번
+          example: 3
+    EnrollmentResponse:
+      type: object
+      required: [enrollmentId, userId, courseId, status, createdAt, updatedAt]
+      properties:
+        enrollmentId: { type: integer, format: int64, example: 101 }
+        userId: { type: string, example: user-001 }
+        courseId: { type: integer, format: int64, example: 1 }
+        status: { $ref: '#/components/schemas/EnrollmentStatus' }
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-05-22T14:30:00Z'
+        cancelledAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+        createdAt: { type: string, format: date-time, example: '2026-05-22T14:15:00Z' }
+        updatedAt: { type: string, format: date-time, example: '2026-05-22T14:30:00Z' }
+    MyEnrollmentItemResponse:
+      type: object
+      description: 내 수강 신청 목록 항목. 제목·가격·정원·신청 상태 표시.
+      required: [enrollmentId, courseId, courseTitle, price, capacity, status, createdAt]
+      properties:
+        enrollmentId: { type: integer, format: int64, example: 101 }
+        courseId: { type: integer, format: int64, example: 1 }
+        courseTitle: { type: string, example: Spring Boot 입문 }
+        price: { type: integer, example: 49000 }
+        capacity: { type: integer, example: 30 }
+        status: { $ref: '#/components/schemas/EnrollmentStatus' }
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-05-22T14:30:00Z'
+        cancelledAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 취소 시각. CANCELLED 상태인 항목에만 채워지며, 그 외는 null.
+          example: null
+        createdAt: { type: string, format: date-time, example: '2026-05-22T14:15:00Z' }
+    CourseEnrollmentItemResponse:
+      type: object
+      description: 강사의 강의별 수강생 목록 항목. PENDING/CONFIRMED만 포함.
+      required: [enrollmentId, userId, status, createdAt]
+      properties:
+        enrollmentId: { type: integer, format: int64, example: 101 }
+        userId: { type: string, example: user-001 }
+        status: { $ref: '#/components/schemas/EnrollmentStatus' }
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-05-22T14:30:00Z'
+        createdAt: { type: string, format: date-time, example: '2026-05-22T14:15:00Z' }
+
+    # ============ 페이지 응답 ============
+    PageCourseSummary:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items: { $ref: '#/components/schemas/CourseSummaryResponse' }
+        page: { type: integer, example: 0 }
+        size: { type: integer, example: 20 }
+        totalElements: { type: integer, format: int64, example: 1 }
+        totalPages: { type: integer, example: 1 }
+    PageMyEnrollmentItem:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items: { $ref: '#/components/schemas/MyEnrollmentItemResponse' }
+        page: { type: integer, example: 0 }
+        size: { type: integer, example: 20 }
+        totalElements: { type: integer, format: int64, example: 1 }
+        totalPages: { type: integer, example: 1 }
+    PageCourseEnrollmentItem:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items: { $ref: '#/components/schemas/CourseEnrollmentItemResponse' }
+        page: { type: integer, example: 0 }
+        size: { type: integer, example: 20 }
+        totalElements: { type: integer, format: int64, example: 1 }
+        totalPages: { type: integer, example: 1 }
