@@ -14,6 +14,9 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.context.annotation.Import;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -63,5 +66,26 @@ class WaitlistRepositoryTest {
 
         assertThat(waitlistRepository.existsByUserAndCourse(user, course)).isTrue();
         assertThat(waitlistRepository.existsByUserAndCourse(other, course)).isFalse();
+    }
+
+    @Test
+    @DisplayName("countByCourseIds는 여러 강의의 대기 인원을 강의별로 묶어 집계하고 대기자 없는 강의는 제외한다")
+    void countByCourseIds_groupsByCourse() {
+        User creator = em.persist(User.builder().userId("creator-batch").role(UserRole.ROLE_CREATOR).build());
+        Course other = em.persist(Course.draftOf(creator, "다른 강의", "설명", 10000, 2, START, END));
+        Course empty = em.persist(Course.draftOf(creator, "대기 없는 강의", "설명", 10000, 2, START, END));
+
+        em.persist(Waitlist.enqueue(user, course, START.plusMinutes(1)));
+        em.persist(Waitlist.enqueue(persistUser("user-002"), course, START.plusMinutes(2)));
+        em.persist(Waitlist.enqueue(persistUser("user-003"), other, START.plusMinutes(3)));
+        em.flush();
+
+        Map<Long, Long> counts = waitlistRepository
+                .countByCourseIds(List.of(course.getId(), other.getId(), empty.getId())).stream()
+                .collect(Collectors.toMap(CourseCountProjection::getCourseId, CourseCountProjection::getCount));
+
+        assertThat(counts).containsEntry(course.getId(), 2L);
+        assertThat(counts).containsEntry(other.getId(), 1L);
+        assertThat(counts).doesNotContainKey(empty.getId());
     }
 }
