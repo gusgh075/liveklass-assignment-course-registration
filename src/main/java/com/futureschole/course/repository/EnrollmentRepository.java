@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
@@ -68,4 +69,16 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, Long> {
             + "where e.course.id in :courseIds and e.status in :statuses group by e.course.id")
     List<CourseCountProjection> countActiveByCourseIds(@Param("courseIds") Collection<Long> courseIds,
                                                        @Param("statuses") Collection<EnrollmentStatus> statuses);
+
+    /**
+     * 결제 기한이 지난 결제 대기 신청을 모두 조회한다(만료 자동 취소 스캐너용).
+     *
+     * <p>스케줄러가 {@code PENDING} 중 생성 시각이 기준 시각보다 이른 신청을 찾아 일괄 취소한다.
+     * {@code (status, created_at)} 인덱스를 전제로 한다.
+     *
+     * @param status    조회 대상 상태({@code PENDING})
+     * @param threshold 기준 시각(현재 시각 - 결제 기한). 이보다 이른 생성 신청이 만료 대상이다.
+     * @return 만료 대상 신청 목록
+     */
+    List<Enrollment> findByStatusAndCreatedAtBefore(EnrollmentStatus status, LocalDateTime threshold);
 }

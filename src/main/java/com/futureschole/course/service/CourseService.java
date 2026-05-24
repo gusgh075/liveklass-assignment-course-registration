@@ -251,6 +251,21 @@ public class CourseService {
         return PageCourseEnrollmentItem.from(page, CourseEnrollmentItemResponse::from);
     }
 
+    /**
+     * 종료일이 지난 모집 중 강의를 일괄 마감한다.
+     *
+     * <p>스케줄러가 주기적으로 호출한다. {@link CourseStatus#OPEN} 중 종료일이 현재 시각보다 이른 강의를
+     * 찾아 {@link CourseStatus#CLOSED}로 전이한다. 더티 체킹으로 반영된다.
+     *
+     * @return 마감 처리된 강의 수
+     */
+    public int closeEndedCourses() {
+        List<Course> ended = courseRepository.findByStatusAndEndDateBefore(
+                CourseStatus.OPEN, LocalDateTime.now(clock));
+        ended.forEach(Course::close);
+        return ended.size();
+    }
+
     /** 강의별 집계 프로젝션 목록을 {@code (강의 ID, 건수)} 맵으로 모은다. */
     private Map<Long, Long> toCountMap(List<CourseCountProjection> projections) {
         return projections.stream()

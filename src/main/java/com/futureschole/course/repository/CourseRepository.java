@@ -10,7 +10,9 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 public interface CourseRepository extends JpaRepository<Course, Long> {
@@ -40,4 +42,16 @@ public interface CourseRepository extends JpaRepository<Course, Long> {
      * @return 조건을 만족하는 강의 페이지
      */
     Page<Course> findByStatusIn(Collection<CourseStatus> statuses, Pageable pageable);
+
+    /**
+     * 종료일이 지난 특정 상태의 강의를 모두 조회한다(종료일 자동 마감 스캐너용).
+     *
+     * <p>스케줄러가 {@code OPEN} 중 종료일이 기준 시각보다 이른 강의를 찾아 일괄 마감한다.
+     * {@code (status, end_date)} 인덱스를 전제로 한다.
+     *
+     * @param status    조회 대상 상태({@code OPEN})
+     * @param threshold 기준 시각(현재 시각). 종료일이 이보다 이른 강의가 마감 대상이다.
+     * @return 마감 대상 강의 목록
+     */
+    List<Course> findByStatusAndEndDateBefore(CourseStatus status, LocalDateTime threshold);
 }
