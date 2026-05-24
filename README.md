@@ -1,4 +1,5 @@
-## 프로젝트 개요
+<details open>
+<summary><h2>프로젝트 개요</h2></summary>
 
 본 프로젝트는 강사(크리에이터)가 강의를 개설하고 수강생이 신청·결제·취소하는 흐름을 다루는 백엔드 시스템입니다. 정원 관리·결제 기한·대기열·환불 규칙을 어긋나지 않게 구현하는 것이 본 과제의 중심입니다.
 
@@ -25,7 +26,10 @@
 - **7일 내 환불**: 결제 확정 후 7일 이내에만 수강 취소가 가능합니다.
 - **대기열 자동 승급**: 자리가 생기면 대기열의 첫 사람이 자동으로 결제 단계로 올라갑니다.
 
-## 기술 스택
+</details>
+
+<details>
+<summary><h2>기술 스택</h2></summary>
 
 | 분류 | 기술 |
 |------|------|
@@ -35,7 +39,10 @@
 | **Test** | ![JUnit 5](https://img.shields.io/badge/JUnit%205-25A162?style=for-the-badge&logo=junit5&logoColor=white) |
 | **Docs** | ![Swagger](https://img.shields.io/badge/Swagger-85EA2D?style=for-the-badge&logo=swagger&logoColor=black) |
 
-## 실행 방법
+</details>
+
+<details>
+<summary><h2>실행 방법</h2></summary>
 
 ### 사전 요구사항
 
@@ -77,7 +84,10 @@ java -jar build\libs\course-0.0.1-SNAPSHOT.jar
 
 `.\gradlew.bat build`는 컴파일 → 테스트 → jar 생성을 한 번에 수행합니다. 테스트를 건너뛰고 jar만 만들고 싶을 땐 `.\gradlew.bat bootJar -x test`를 사용합니다.
 
-## 요구사항 해석 및 가정
+</details>
+
+<details>
+<summary><h2>요구사항 해석 및 가정</h2></summary>
 
 ### 1. 강의 수강 기간 종료 시 자동 마감
 - **관련 요구사항**: #1 강의 등록
@@ -176,7 +186,10 @@ java -jar build\libs\course-0.0.1-SNAPSHOT.jar
 | 11 | 강의별 수강생 목록 조회 | ROLE_CREATOR | 해당 강의에 대해 신청 상태가 `PENDING`, `CONFIRMED`인 유저 목록을 보여준다. |
 | 12 | 강의 상태 변경 | ROLE_CREATOR | 크리에이터가 자신의 강의를 **오픈**(`DRAFT → OPEN`)하거나 **마감**(`OPEN → CLOSED`)한다. 요청 본문에 목표 상태를 지정해 전이하며, 종료일 경과 시에는 자동 마감(### 1)도 적용된다. |
 
-## 설계 결정과 이유
+</details>
+
+<details>
+<summary><h2>설계 결정과 이유</h2></summary>
 
 ### 1. 주기 작업에 Spring Batch 대신 스케줄러(`@Scheduled`)를 선택
 
@@ -219,7 +232,10 @@ java -jar build\libs\course-0.0.1-SNAPSHOT.jar
 - **결론**: 전통 레이어드 구조에 단일 계층 패키지(`controller / service / repository / entity / dto`)를 둔다. 도메인 구분은 클래스명 접두(`Course*`, `Enrollment*`, `User*`, `Waitlist*`)로만 처리한다. 단, DTO는 요청·응답 두 갈래가 명확히 갈리고 양도 빠르게 늘어나는 경향이 있어 `dto/request`와 `dto/response`로 한 단계 더 분리했다. 헥사고날은 외부 어댑터(결제 GW, Redis 분산 락, 알림)가 실제로 들어올 때 의미가 큰데, 본 과제에서는 그것들이 모두 미구현(`## 미구현 / 제약사항`)이라 추상화 비용만 남는다.
 - **향후 확장 여지**: 한 계층 패키지에 클래스가 20~30개를 넘어 가독성이 떨어지면 그 계층부터 도메인별 서브패키지(예: `controller/course/`, `controller/enrollment/`)로 재분리한다. 결제 GW·Redis 분산 락 같은 외부 어댑터가 정식 도입되는 시점에는 헥사고날 형태로의 부분 리팩토링도 검토 대상이 된다.
 
-## 미구현 / 제약사항
+</details>
+
+<details>
+<summary><h2>미구현 / 제약사항</h2></summary>
 
 ### 미구현
 
@@ -237,9 +253,23 @@ java -jar build\libs\course-0.0.1-SNAPSHOT.jar
 - **대용량/집계 작업 미대비** — 만료 대상이 수만 건 이상으로 증가하거나 정기 집계·ETL성 작업이 필요해지면 현재 `@Scheduled` 기반 구조에서 한계가 있다(설계 결정 `### 1`). 그 시점에는 Spring Batch로 해당 작업만 분리해야 한다.
 - **결제 도메인 데이터 미저장** — 결제 수단·금액·영수증 등은 저장하지 않는다(`### 10`). 결제 이력 조회·정산이 필요해지는 시점엔 별도 모델링이 필요하다.
 
-## AI 활용 범위
-## API 목록 및 예시
-## 데이터 모델 설명
+</details>
+
+<details>
+<summary><h2>AI 활용 범위</h2></summary>
+
+과제 요구사항을 직접 분석하여 기능 구조, 데이터 흐름, 기술 스택을 먼저 설계한 후에 모듈 단위의 구현에 AI를 사용했습니다. AI가 생성한 코드는 직접 검증하고 의도와 다른 부분은 대안을 찾고 수정했으며, 동작 원리를 이해한 부분만 반영했습니다. 생산성을 높이기 위해 서브에이전트를 활용하여 영향이 적은 작업은 병렬처리했습니다.
+
+</details>
+
+<details>
+<summary><h2>API 목록 및 예시</h2></summary>
+
+부팅 후 Swagger UI(`http://localhost:8080/swagger-ui.html`)와 명세 산출물 `docs/openapi.yml`에서 전체 API의 경로·요청·응답·예시를 확인할 수 있습니다.
+</details>
+
+<details>
+<summary><h2>데이터 모델 설명</h2></summary>
 
 ### 엔티티 관계도
 
@@ -412,7 +442,11 @@ erDiagram
 | `CONFIRMED` | 결제 완료, 수강 확정 |
 | `CANCELLED` | 취소됨 |
 
-## 테스트 실행 방법
+</details>
+
+<details>
+<summary><h2>테스트 실행 방법</h2></summary>
+
 
 JUnit 5 기반이며 Gradle Wrapper로 실행합니다. Repository 슬라이스(`@DataJpaTest`), Service 단위(Mockito), Controller 슬라이스(`@WebMvcTest`), 그리고 동시 수강신청을 멀티스레드로 검증하는 동시성 통합 테스트(`@SpringBootTest`).
 
@@ -432,3 +466,5 @@ JUnit 5 기반이며 Gradle Wrapper로 실행합니다. Repository 슬라이스(
 
 - `build\reports\tests\test\index.html` — 사람이 읽기 좋은 종합 리포트
 - `build\test-results\test\` — JUnit XML 원본 (CI 연동용)
+
+</details>
