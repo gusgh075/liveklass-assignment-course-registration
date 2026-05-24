@@ -47,8 +47,14 @@ public enum ErrorCode {
     /** 본인이 작성한 강의가 아닌 강의에 대한 수정·상태 변경·수강생 목록 조회 시도. */
     COURSE_NOT_OWNED(240301, HttpStatus.FORBIDDEN, "본인이 작성한 강의가 아닙니다."),
 
+    /** 허용되지 않은 강의 상태 전이(예: {@code CLOSED → OPEN}, {@code OPEN → DRAFT}). */
+    COURSE_ILLEGAL_TRANSITION(240901, HttpStatus.CONFLICT, "허용되지 않은 강의 상태 전이입니다."),
+
     /** {@code DRAFT} 이외 상태의 강의를 수정 시도. */
     COURSE_NOT_EDITABLE(240902, HttpStatus.CONFLICT, "DRAFT 상태의 강의만 수정할 수 있습니다."),
+
+    /** 종료일이 이미 경과한 강의에 대한 작업 시도(오픈 등). */
+    COURSE_ENDED(240903, HttpStatus.CONFLICT, "종료일이 경과한 강의입니다."),
 
     // ============ Enrollment (3xxxxx) ============
 
