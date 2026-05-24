@@ -5,23 +5,30 @@ import com.futureschole.course.common.BusinessException;
 import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.CourseCreateRequest;
 import com.futureschole.course.dto.response.CourseDetailResponse;
+import com.futureschole.course.dto.response.CourseSummaryResponse;
+import com.futureschole.course.dto.response.PageCourseSummary;
 import com.futureschole.course.entity.type.CourseStatus;
 import com.futureschole.course.service.CourseService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -368,6 +375,73 @@ class CourseControllerTest {
                     .andExpect(jsonPath("$.code").value(404))
                     .andExpect(jsonPath("$.error.code").value(240401))
                     .andExpect(jsonPath("$.error.message").value("COURSE_NOT_FOUND"));
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /courses")
+    class GetList {
+
+        private PageCourseSummary samplePage() {
+            CourseSummaryResponse item = new CourseSummaryResponse(
+                    1L, "Spring Boot 입문", 49000, 30, 12, 0, DEFAULT_START, DEFAULT_END, CourseStatus.OPEN);
+            return new PageCourseSummary(List.of(item), 0, 20, 1, 1);
+        }
+
+        @Test
+        @DisplayName("status 파라미터가 없으면 기본 OPEN·CLOSED로 조회하고 200을 반환한다")
+        void getList_defaultStatus() throws Exception {
+            given(courseService.getList(anyList(), any(Pageable.class))).willReturn(samplePage());
+
+            mockMvc.perform(get("/courses"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.content[0].id").value(1))
+                    .andExpect(jsonPath("$.data.content[0].title").value("Spring Boot 입문"))
+                    .andExpect(jsonPath("$.data.content[0].enrolledCount").value(12))
+                    .andExpect(jsonPath("$.data.content[0].status").value("OPEN"))
+                    .andExpect(jsonPath("$.data.page").value(0))
+                    .andExpect(jsonPath("$.data.size").value(20))
+                    .andExpect(jsonPath("$.data.totalElements").value(1))
+                    .andExpect(jsonPath("$.error").doesNotExist());
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<CourseStatus>> statusCaptor = ArgumentCaptor.forClass(List.class);
+            verify(courseService).getList(statusCaptor.capture(), any(Pageable.class));
+            assertThat(statusCaptor.getValue())
+                    .containsExactlyInAnyOrder(CourseStatus.OPEN, CourseStatus.CLOSED);
+        }
+
+        @Test
+        @DisplayName("status 파라미터를 지정하면 그대로 서비스에 전달한다")
+        void getList_explicitStatus() throws Exception {
+            given(courseService.getList(anyList(), any(Pageable.class))).willReturn(samplePage());
+
+            mockMvc.perform(get("/courses").param("status", "OPEN"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content[0].id").value(1));
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<CourseStatus>> statusCaptor = ArgumentCaptor.forClass(List.class);
+            verify(courseService).getList(statusCaptor.capture(), any(Pageable.class));
+            assertThat(statusCaptor.getValue()).containsExactly(CourseStatus.OPEN);
+        }
+
+        @Test
+        @DisplayName("page·size 파라미터를 Pageable로 전달한다")
+        void getList_paging() throws Exception {
+            given(courseService.getList(anyList(), any(Pageable.class)))
+                    .willReturn(new PageCourseSummary(List.of(), 2, 5, 0, 0));
+
+            mockMvc.perform(get("/courses").param("page", "2").param("size", "5"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content").isArray());
+
+            ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+            verify(courseService).getList(anyList(), pageableCaptor.capture());
+            assertThat(pageableCaptor.getValue().getPageNumber()).isEqualTo(2);
+            assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(5);
         }
     }
 }
