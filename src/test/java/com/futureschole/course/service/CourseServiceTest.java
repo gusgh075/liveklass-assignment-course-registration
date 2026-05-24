@@ -4,11 +4,14 @@ import com.futureschole.course.common.BusinessException;
 import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.CourseCreateRequest;
 import com.futureschole.course.dto.response.CourseDetailResponse;
+import com.futureschole.course.dto.response.CourseSummaryResponse;
+import com.futureschole.course.dto.response.PageCourseSummary;
 import com.futureschole.course.entity.Course;
 import com.futureschole.course.entity.User;
 import com.futureschole.course.entity.type.CourseStatus;
 import com.futureschole.course.entity.type.EnrollmentStatus;
 import com.futureschole.course.entity.type.UserRole;
+import com.futureschole.course.repository.CourseCountProjection;
 import com.futureschole.course.repository.CourseRepository;
 import com.futureschole.course.repository.EnrollmentRepository;
 import com.futureschole.course.repository.UserRepository;
@@ -22,6 +25,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
@@ -31,6 +37,8 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -357,6 +365,110 @@ class CourseServiceTest {
 
             verify(enrollmentRepository, never()).countByCourseAndStatusIn(any(), any());
             verify(waitlistRepository, never()).countByCourse(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("강의 목록 조회")
+    class GetList {
+
+        private static final List<EnrollmentStatus> ACTIVE =
+                List.of(EnrollmentStatus.PENDING, EnrollmentStatus.CONFIRMED);
+
+        @Test
+        @DisplayName("상태로 필터한 페이지를 조회하고 강의별 신청·대기 인원을 매핑해 반환한다")
+        void getList_mapsCountsPerCourse() {
+            // given
+            List<CourseStatus> statuses = List.of(CourseStatus.OPEN, CourseStatus.CLOSED);
+            Pageable pageable = PageRequest.of(0, 20);
+            Course open = courseWithId(10L, CourseStatus.OPEN);
+            Course closed = courseWithId(20L, CourseStatus.CLOSED);
+            given(courseRepository.findByStatusIn(statuses, pageable))
+                    .willReturn(new PageImpl<>(List.of(open, closed), pageable, 2));
+            given(enrollmentRepository.countActiveByCourseIds(List.of(10L, 20L), ACTIVE))
+                    .willReturn(List.of(projection(10L, 3L), projection(20L, 5L)));
+            given(waitlistRepository.countByCourseIds(List.of(10L, 20L)))
+                    .willReturn(List.of(projection(10L, 2L)));
+
+            // when
+            PageCourseSummary result = courseService.getList(statuses, pageable);
+
+            // then
+            assertThat(result.page()).isEqualTo(0);
+            assertThat(result.size()).isEqualTo(20);
+            assertThat(result.totalElements()).isEqualTo(2);
+            assertThat(result.totalPages()).isEqualTo(1);
+            assertThat(result.content())
+                    .extracting(CourseSummaryResponse::id,
+                            CourseSummaryResponse::enrolledCount,
+                            CourseSummaryResponse::waitingCount,
+                            CourseSummaryResponse::status)
+                    .containsExactly(
+                            org.assertj.core.groups.Tuple.tuple(10L, 3, 2, CourseStatus.OPEN),
+                            org.assertj.core.groups.Tuple.tuple(20L, 5, 0, CourseStatus.CLOSED));
+        }
+
+        @Test
+        @DisplayName("집계 결과에 없는 강의의 신청·대기 인원은 0으로 채운다")
+        void getList_defaultsMissingCountsToZero() {
+            // given
+            List<CourseStatus> statuses = List.of(CourseStatus.OPEN);
+            Pageable pageable = PageRequest.of(0, 20);
+            Course open = courseWithId(10L, CourseStatus.OPEN);
+            given(courseRepository.findByStatusIn(statuses, pageable))
+                    .willReturn(new PageImpl<>(List.of(open), pageable, 1));
+            given(enrollmentRepository.countActiveByCourseIds(List.of(10L), ACTIVE))
+                    .willReturn(List.of());
+            given(waitlistRepository.countByCourseIds(List.of(10L)))
+                    .willReturn(List.of());
+
+            // when
+            PageCourseSummary result = courseService.getList(statuses, pageable);
+
+            // then
+            assertThat(result.content()).hasSize(1);
+            assertThat(result.content().get(0).enrolledCount()).isZero();
+            assertThat(result.content().get(0).waitingCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("빈 페이지면 배치 카운트 쿼리를 던지지 않고 빈 콘텐츠를 반환한다")
+        void getList_emptyPageSkipsBatchCount() {
+            // given
+            List<CourseStatus> statuses = List.of(CourseStatus.OPEN, CourseStatus.CLOSED);
+            Pageable pageable = PageRequest.of(0, 20);
+            given(courseRepository.findByStatusIn(statuses, pageable))
+                    .willReturn(new PageImpl<>(List.of(), pageable, 0));
+
+            // when
+            PageCourseSummary result = courseService.getList(statuses, pageable);
+
+            // then
+            assertThat(result.content()).isEmpty();
+            assertThat(result.totalElements()).isZero();
+            verify(enrollmentRepository, never()).countActiveByCourseIds(anyList(), eq(ACTIVE));
+            verify(waitlistRepository, never()).countByCourseIds(anyList());
+        }
+
+        private Course courseWithId(Long id, CourseStatus status) {
+            Course course = Course.draftOf(creator, "강의 " + id, "설명", 10000, 30, DEFAULT_START, DEFAULT_END);
+            ReflectionTestUtils.setField(course, "id", id);
+            ReflectionTestUtils.setField(course, "status", status);
+            return course;
+        }
+
+        private CourseCountProjection projection(Long courseId, long count) {
+            return new CourseCountProjection() {
+                @Override
+                public Long getCourseId() {
+                    return courseId;
+                }
+
+                @Override
+                public long getCount() {
+                    return count;
+                }
+            };
         }
     }
 }
