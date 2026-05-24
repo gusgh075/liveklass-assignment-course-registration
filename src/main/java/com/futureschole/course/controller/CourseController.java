@@ -5,11 +5,15 @@ import com.futureschole.course.common.BusinessException;
 import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.CourseCreateRequest;
 import com.futureschole.course.dto.response.CourseDetailResponse;
+import com.futureschole.course.dto.response.PageCourseSummary;
+import com.futureschole.course.entity.type.CourseStatus;
 import com.futureschole.course.service.CourseService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,7 +23,10 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @Tag(name = "Course", description = "강의 등록·조회·상태 변경, 강의별 수강생 조회")
 @RestController
@@ -27,7 +34,26 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class CourseController {
 
+    /** 목록 조회에서 {@code status} 파라미터가 없을 때 적용하는 기본 필터. {@code DRAFT}는 제외한다. */
+    private static final List<CourseStatus> DEFAULT_LIST_STATUSES =
+            List.of(CourseStatus.OPEN, CourseStatus.CLOSED);
+
     private final CourseService courseService;
+
+    @Operation(
+            summary = "강의 목록 조회",
+            description = "강의 목록을 페이지네이션으로 조회한다. status로 필터하며 미지정 시 기본은 OPEN+CLOSED이고 DRAFT는 제외한다. 인증 헤더는 필요하지 않다."
+    )
+    @GetMapping
+    public ResponseEntity<ApiResponse<PageCourseSummary>> getList(
+            @RequestParam(required = false) List<CourseStatus> status,
+            @PageableDefault(size = 20) Pageable pageable) {
+
+        List<CourseStatus> statuses = (status == null || status.isEmpty()) ? DEFAULT_LIST_STATUSES : status;
+        PageCourseSummary data = courseService.getList(statuses, pageable);
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(ApiResponse.success(HttpStatus.OK, data, "강의 목록 조회에 성공했습니다."));
+    }
 
     @Operation(
             summary = "강의 등록 (DRAFT 생성)",
