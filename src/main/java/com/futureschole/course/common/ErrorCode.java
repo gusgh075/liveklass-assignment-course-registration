@@ -68,7 +68,13 @@ public enum ErrorCode {
     PAYMENT_DEADLINE_EXPIRED(340903, HttpStatus.CONFLICT, "결제 기한이 만료되었습니다."),
 
     /** 결제 확정 대상이 {@code PENDING} 상태가 아님(이미 {@code CONFIRMED}이거나 {@code CANCELLED}). */
-    INVALID_STATUS_FOR_CONFIRM(340904, HttpStatus.CONFLICT, "결제 확정할 수 없는 상태의 신청입니다.");
+    INVALID_STATUS_FOR_CONFIRM(340904, HttpStatus.CONFLICT, "결제 확정할 수 없는 상태의 신청입니다."),
+
+    /** 수강 취소 대상이 {@code CONFIRMED} 상태가 아님(예: {@code PENDING}·{@code CANCELLED}). */
+    INVALID_STATUS_FOR_CANCEL(340905, HttpStatus.CONFLICT, "취소할 수 없는 상태의 신청입니다."),
+
+    /** 결제 확정 후 7일이 경과한 신청에 대한 수강 취소 시도. */
+    REFUND_WINDOW_EXPIRED(340906, HttpStatus.CONFLICT, "결제 후 7일이 경과하여 수강 취소가 불가합니다.");
 
     /** 6자리 도메인 에러 식별 정수. {@code D HHH SS}(도메인 prefix·HTTP 상태·일련번호) 결합. */
     private final int code;
