@@ -4,6 +4,9 @@ import com.futureschole.course.entity.Course;
 import com.futureschole.course.entity.Enrollment;
 import com.futureschole.course.entity.User;
 import com.futureschole.course.entity.type.EnrollmentStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -15,6 +18,20 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, Long> {
 
     /** 사용자·강의 조합에 주어진 상태의 신청이 존재하는지 확인한다(활성 신청 중복 사전 검증용). */
     boolean existsByUserAndCourseAndStatusIn(User user, Course course, Collection<EnrollmentStatus> statuses);
+
+    /**
+     * 한 사용자의 수강 신청을 모든 상태 포함해 페이지로 조회한다(내 신청 목록 조회용).
+     *
+     * <p>{@code PENDING}/{@code CONFIRMED}/{@code CANCELLED}를 가리지 않고 본인 신청 전체를 반환한다.
+     * 목록 항목이 강의 제목·가격·정원을 노출하므로 {@link EntityGraph}로 연관 강의를 함께 로드해
+     * N+1을 피한다. {@code (user_id, course_id)} 인덱스를 전제로 한다.
+     *
+     * @param user     조회 대상 사용자
+     * @param pageable 페이지 요청(번호·크기·정렬)
+     * @return 강의가 함께 로드된 수강 신청 페이지
+     */
+    @EntityGraph(attributePaths = "course")
+    Page<Enrollment> findByUser(User user, Pageable pageable);
 
     /** 강의의 주어진 상태 신청 수를 센다(정원 산정은 {@code PENDING}+{@code CONFIRMED}). */
     int countByCourseAndStatusIn(Course course, Collection<EnrollmentStatus> statuses);
