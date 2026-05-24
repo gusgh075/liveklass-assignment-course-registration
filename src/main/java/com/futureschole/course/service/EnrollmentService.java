@@ -4,6 +4,7 @@ import com.futureschole.course.common.BusinessException;
 import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.EnrollmentCreateRequest;
 import com.futureschole.course.dto.response.EnrollmentCreateResponse;
+import com.futureschole.course.dto.response.EnrollmentResponse;
 import com.futureschole.course.entity.Course;
 import com.futureschole.course.entity.Enrollment;
 import com.futureschole.course.entity.User;
@@ -81,6 +82,42 @@ public class EnrollmentService {
             return enroll(user, course);
         }
         return joinWaitlist(user, course);
+    }
+
+    /**
+     * 본인의 결제 대기 신청을 결제 확정으로 전이한다.
+     *
+     * <p>신청을 조회해 본인 소유인지 확인하고, 상태가 {@code PENDING}이며 결제 기한 30분이 지나지
+     * 않았을 때만 {@code CONFIRMED}로 전이한다. 확정 시각이 기록되며 이는 환불 기준 시각이 된다.
+     * 영속 상태의 엔티티를 변경하므로 더티 체킹으로 반영되고 별도 저장 호출은 하지 않는다.
+     *
+     * @param userId       요청 사용자의 외부 식별자({@code X-User-Id} 헤더 값)
+     * @param enrollmentId 결제 확정 대상 신청 식별자
+     * @return 확정 후 신청 상태를 담은 응답
+     * @throws BusinessException 신청이 없으면 {@link ErrorCode#ENROLLMENT_NOT_FOUND},
+     *                           본인 신청이 아니면 {@link ErrorCode#ENROLLMENT_NOT_OWNED},
+     *                           상태가 {@code PENDING}이 아니면 {@link ErrorCode#INVALID_STATUS_FOR_CONFIRM},
+     *                           결제 기한이 지났으면 {@link ErrorCode#PAYMENT_DEADLINE_EXPIRED}
+     */
+    public EnrollmentResponse confirm(String userId, Long enrollmentId) {
+        Enrollment enrollment = enrollmentRepository.findById(enrollmentId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ENROLLMENT_NOT_FOUND));
+
+        if (!enrollment.getUser().getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.ENROLLMENT_NOT_OWNED);
+        }
+        if (enrollment.getStatus() != EnrollmentStatus.PENDING) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS_FOR_CONFIRM);
+        }
+
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime paymentDeadline = enrollment.getCreatedAt().plusMinutes(PAYMENT_DEADLINE_MINUTES);
+        if (paymentDeadline.isBefore(now)) {
+            throw new BusinessException(ErrorCode.PAYMENT_DEADLINE_EXPIRED);
+        }
+
+        enrollment.confirm(now);
+        return EnrollmentResponse.from(enrollment);
     }
 
     /** 정원 내 신청: {@code PENDING} 레코드를 만들고 생성 시각 + 30분을 결제 기한으로 반환한다. */
