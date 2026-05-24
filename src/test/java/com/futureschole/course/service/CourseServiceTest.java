@@ -149,4 +149,129 @@ class CourseServiceTest {
             verify(courseRepository, never()).save(any());
         }
     }
+
+    @Nested
+    @DisplayName("강의 수정")
+    class Update {
+
+        private static final Long COURSE_ID = 100L;
+        private static final LocalDateTime CREATED_AT = LocalDateTime.of(2026, 5, 22, 14, 15);
+        private static final LocalDateTime UPDATED_START = LocalDateTime.of(2026, 9, 1, 9, 0);
+        private static final LocalDateTime UPDATED_END = LocalDateTime.of(2026, 10, 31, 18, 0);
+
+        private Course existingDraft;
+        private CourseCreateRequest updateRequest;
+
+        @BeforeEach
+        void setUpUpdate() {
+            existingDraft = Course.draftOf(
+                    creator,
+                    "수정 전 제목",
+                    "수정 전 설명입니다.",
+                    10000,
+                    10,
+                    DEFAULT_START,
+                    DEFAULT_END
+            );
+            ReflectionTestUtils.setField(existingDraft, "id", COURSE_ID);
+            ReflectionTestUtils.setField(existingDraft, "createdAt", CREATED_AT);
+            ReflectionTestUtils.setField(existingDraft, "updatedAt", CREATED_AT);
+
+            updateRequest = new CourseCreateRequest(
+                    "수정 후 제목",
+                    "수정 후 설명입니다.",
+                    50000,
+                    40,
+                    UPDATED_START,
+                    UPDATED_END
+            );
+        }
+
+        @Test
+        @DisplayName("본인의 DRAFT 강의면 모든 필드를 교체하고 상세 응답을 반환한다")
+        void update_success() {
+            // given
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(existingDraft));
+
+            // when
+            CourseDetailResponse response = courseService.update(CREATOR_USER_ID, COURSE_ID, updateRequest);
+
+            // then
+            CourseDetailResponse expected = new CourseDetailResponse(
+                    COURSE_ID,
+                    CREATOR_USER_ID,
+                    updateRequest.title(),
+                    updateRequest.description(),
+                    updateRequest.price(),
+                    updateRequest.capacity(),
+                    0,
+                    0,
+                    UPDATED_START,
+                    UPDATED_END,
+                    CourseStatus.DRAFT,
+                    CREATED_AT,
+                    CREATED_AT
+            );
+            assertThat(response).usingRecursiveComparison().isEqualTo(expected);
+        }
+
+        @Test
+        @DisplayName("더티 체킹으로 영속화하므로 save를 명시 호출하지 않는다")
+        void update_persistsByDirtyCheckingWithoutSave() {
+            // given
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(existingDraft));
+
+            // when
+            courseService.update(CREATOR_USER_ID, COURSE_ID, updateRequest);
+
+            // then
+            verify(courseRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("강의가 존재하지 않으면 COURSE_NOT_FOUND를 던진다")
+        void update_courseNotFound() {
+            // given
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.empty());
+
+            // when & then
+            assertThatThrownBy(() -> courseService.update(CREATOR_USER_ID, COURSE_ID, updateRequest))
+                    .as("존재하지 않는 강의를 수정하면 COURSE_NOT_FOUND 코드의 BusinessException이 발생해야 한다")
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("본인이 작성한 강의가 아니면 COURSE_NOT_OWNED를 던진다")
+        void update_courseNotOwned() {
+            // given
+            User otherCreator = User.builder()
+                    .userId("creator-999")
+                    .role(UserRole.ROLE_CREATOR)
+                    .build();
+            ReflectionTestUtils.setField(otherCreator, "id", 2L);
+            ReflectionTestUtils.setField(existingDraft, "creator", otherCreator);
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(existingDraft));
+
+            // when & then
+            assertThatThrownBy(() -> courseService.update(CREATOR_USER_ID, COURSE_ID, updateRequest))
+                    .as("타인의 강의를 수정하면 COURSE_NOT_OWNED 코드의 BusinessException이 발생해야 한다")
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_NOT_OWNED);
+        }
+
+        @Test
+        @DisplayName("DRAFT가 아닌 강의를 수정하면 COURSE_NOT_EDITABLE을 던진다")
+        void update_courseNotEditable() {
+            // given
+            ReflectionTestUtils.setField(existingDraft, "status", CourseStatus.OPEN);
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(existingDraft));
+
+            // when & then
+            assertThatThrownBy(() -> courseService.update(CREATOR_USER_ID, COURSE_ID, updateRequest))
+                    .as("DRAFT가 아닌 강의를 수정하면 COURSE_NOT_EDITABLE 코드의 BusinessException이 발생해야 한다")
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_NOT_EDITABLE);
+        }
+    }
 }
