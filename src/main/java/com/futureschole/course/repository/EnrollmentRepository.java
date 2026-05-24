@@ -33,6 +33,22 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, Long> {
     @EntityGraph(attributePaths = "course")
     Page<Enrollment> findByUser(User user, Pageable pageable);
 
+    /**
+     * 강의의 주어진 상태 신청을 페이지로 조회한다(강의별 수강생 목록 조회용).
+     *
+     * <p>목록 항목이 신청자의 외부 식별자를 노출하므로, 사용자 연관을 함께 즉시 로드해 페이지 항목마다
+     * 사용자를 다시 조회하는 N+1을 피한다. 정원 산정과 동일하게 {@code PENDING}+{@code CONFIRMED}만
+     * 대상으로 하며, {@code (course_id, status)} 인덱스를 전제로 한다.
+     *
+     * @param course   대상 강의
+     * @param statuses 조회에 포함할 신청 상태
+     * @param pageable 페이지·정렬 정보
+     * @return 조건을 만족하는 신청 페이지
+     */
+    @EntityGraph(attributePaths = "user")
+    Page<Enrollment> findByCourseAndStatusIn(
+            Course course, Collection<EnrollmentStatus> statuses, Pageable pageable);
+
     /** 강의의 주어진 상태 신청 수를 센다(정원 산정은 {@code PENDING}+{@code CONFIRMED}). */
     int countByCourseAndStatusIn(Course course, Collection<EnrollmentStatus> statuses);
 
