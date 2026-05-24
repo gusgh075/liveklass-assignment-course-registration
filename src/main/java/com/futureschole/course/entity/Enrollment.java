@@ -103,4 +103,17 @@ public class Enrollment extends BaseTimeEntity {
         this.status = EnrollmentStatus.CONFIRMED;
         this.confirmedAt = now;
     }
+
+    /**
+     * 수강 취소 상태로 전이한다.
+     *
+     * <p>상태를 {@link EnrollmentStatus#CANCELLED}로 바꾸고 취소 시각을 기록한다. 전이 가능 여부
+     * 검증(현재 상태·환불 기한)은 서비스에서 끝내며, 이 메서드는 전달받은 값만 반영한다.
+     *
+     * @param now 취소 시각으로 기록할 시각
+     */
+    public void cancel(LocalDateTime now) {
+        this.status = EnrollmentStatus.CANCELLED;
+        this.cancelledAt = now;
+    }
 }
