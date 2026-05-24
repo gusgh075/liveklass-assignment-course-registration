@@ -4,30 +4,42 @@ import com.futureschole.course.common.BusinessException;
 import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.CourseCreateRequest;
 import com.futureschole.course.dto.response.CourseDetailResponse;
+import com.futureschole.course.dto.response.CourseSummaryResponse;
+import com.futureschole.course.dto.response.PageCourseSummary;
 import com.futureschole.course.entity.Course;
 import com.futureschole.course.entity.User;
 import com.futureschole.course.entity.type.CourseStatus;
 import com.futureschole.course.entity.type.EnrollmentStatus;
+import com.futureschole.course.repository.CourseCountProjection;
 import com.futureschole.course.repository.CourseRepository;
 import com.futureschole.course.repository.EnrollmentRepository;
 import com.futureschole.course.repository.UserRepository;
 import com.futureschole.course.repository.WaitlistRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 강의 도메인 서비스.
  *
- * <p>강의 등록·수정·상태 변경 등 강의 단건 처리를 담당한다. 권한(역할) 검증은 컨트롤러에서
+ * <p>강의 등록·수정·상세·목록 조회 등 강의 처리를 담당한다. 권한(역할) 검증은 컨트롤러에서
  * 헤더 기반으로 끝나므로 본 서비스는 도메인 로직과 영속화에만 집중한다.
  */
 @Service
 @Transactional
 @RequiredArgsConstructor
 public class CourseService {
+
+    /** 정원에 포함되는 신청 상태. {@code CANCELLED}는 제외한다. */
+    private static final List<EnrollmentStatus> ACTIVE_STATUSES =
+            List.of(EnrollmentStatus.PENDING, EnrollmentStatus.CONFIRMED);
 
     private final UserRepository userRepository;
     private final CourseRepository courseRepository;
@@ -120,10 +132,48 @@ public class CourseService {
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
 
-        int enrolledCount = enrollmentRepository.countByCourseAndStatusIn(
-                course, List.of(EnrollmentStatus.PENDING, EnrollmentStatus.CONFIRMED));
+        int enrolledCount = enrollmentRepository.countByCourseAndStatusIn(course, ACTIVE_STATUSES);
         int waitingCount = waitlistRepository.countByCourse(course);
 
         return CourseDetailResponse.from(course, enrolledCount, waitingCount);
+    }
+
+    /**
+     * 강의 목록을 상태로 필터해 페이지 단위로 조회한다.
+     *
+     * <p>주어진 상태에 속하는 강의를 페이지로 조회한 뒤, 그 페이지에 담긴 강의 ID들을 한 번에 묶어
+     * 활성 신청 인원({@code PENDING + CONFIRMED})과 대기열 인원을 각각 집계한다. 강의 건마다 카운트를
+     * 따로 질의하지 않으므로 목록 크기와 무관하게 카운트 쿼리는 두 번으로 고정된다. 집계 결과에 없는
+     * 강의는 인원이 0인 것으로 본다.
+     *
+     * @param statuses 조회 대상 상태 집합(목록 조회 기본은 {@code OPEN}+{@code CLOSED})
+     * @param pageable 페이지·정렬 정보
+     * @return 강의 목록 페이지 응답
+     */
+    @Transactional(readOnly = true)
+    public PageCourseSummary getList(List<CourseStatus> statuses, Pageable pageable) {
+        Page<Course> page = courseRepository.findByStatusIn(statuses, pageable);
+
+        List<Long> courseIds = page.getContent().stream()
+                .map(Course::getId)
+                .toList();
+        Map<Long, Long> enrolledCounts = toCountMap(courseIds.isEmpty()
+                ? List.of()
+                : enrollmentRepository.countActiveByCourseIds(courseIds, ACTIVE_STATUSES));
+        Map<Long, Long> waitingCounts = toCountMap(courseIds.isEmpty()
+                ? List.of()
+                : waitlistRepository.countByCourseIds(courseIds));
+
+        Function<Course, CourseSummaryResponse> mapper = course -> CourseSummaryResponse.from(
+                course,
+                Math.toIntExact(enrolledCounts.getOrDefault(course.getId(), 0L)),
+                Math.toIntExact(waitingCounts.getOrDefault(course.getId(), 0L)));
+        return PageCourseSummary.from(page, mapper);
+    }
+
+    /** 강의별 집계 프로젝션 목록을 {@code (강의 ID, 건수)} 맵으로 모은다. */
+    private Map<Long, Long> toCountMap(List<CourseCountProjection> projections) {
+        return projections.stream()
+                .collect(Collectors.toMap(CourseCountProjection::getCourseId, CourseCountProjection::getCount));
     }
 }
