@@ -83,6 +83,22 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 도메인 비즈니스 규칙 위반({@link BusinessException})을 처리한다.
+     *
+     * <p>예외에 담긴 {@link ErrorCode}의 HTTP 상태와 6자리 도메인 코드를 그대로 응답에 반영하고,
+     * 본문 메시지는 예외에 실린 메시지(컨텍스트 문구 또는 기본 메시지)를 사용한다.
+     *
+     * @param ex 발생한 비즈니스 예외
+     * @return {@link ErrorCode}에 대응하는 실패 응답
+     */
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException ex) {
+        ErrorCode errorCode = ex.getErrorCode();
+        ApiResponse<Void> body = ApiResponse.failure(errorCode, ex.getMessage());
+        return ResponseEntity.status(errorCode.getHttpStatus()).body(body);
+    }
+
+    /**
      * 위에서 잡지 못한 모든 예외에 대한 fallback. 서버 측 결함으로 간주하고 로그를 남긴다.
      *
      * @param ex 발생한 예외
