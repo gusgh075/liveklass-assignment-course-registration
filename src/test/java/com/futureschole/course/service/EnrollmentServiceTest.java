@@ -15,16 +15,22 @@ import com.futureschole.course.repository.CourseRepository;
 import com.futureschole.course.repository.EnrollmentRepository;
 import com.futureschole.course.repository.UserRepository;
 import com.futureschole.course.repository.WaitlistRepository;
+import com.futureschole.course.dto.response.EnrollmentResponse;
+import com.futureschole.course.entity.type.EnrollmentStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,6 +54,11 @@ class EnrollmentServiceTest {
     private static final LocalDateTime START = LocalDateTime.of(2026, 6, 1, 10, 0);
     private static final LocalDateTime END = LocalDateTime.of(2026, 7, 31, 18, 0);
 
+    /** 고정 기준 시각. 결제 기한 판정을 결정적으로 만들기 위해 {@link Clock#fixed}로 주입한다. */
+    private static final ZoneId ZONE = ZoneOffset.UTC;
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 5, 24, 14, 30);
+    private static final Clock FIXED_CLOCK = Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZONE);
+
     @Mock
     private UserRepository userRepository;
 
@@ -60,7 +71,6 @@ class EnrollmentServiceTest {
     @Mock
     private WaitlistRepository waitlistRepository;
 
-    @InjectMocks
     private EnrollmentService enrollmentService;
 
     private User user;
@@ -69,6 +79,9 @@ class EnrollmentServiceTest {
 
     @BeforeEach
     void setUp() {
+        enrollmentService = new EnrollmentService(
+                userRepository, courseRepository, enrollmentRepository, waitlistRepository, FIXED_CLOCK);
+
         user = User.builder().userId(USER_ID).role(UserRole.ROLE_USER).build();
         ReflectionTestUtils.setField(user, "id", 1L);
 
@@ -213,5 +226,86 @@ class EnrollmentServiceTest {
                 .as("존재하지 않는 사용자 신청은 USER_NOT_FOUND 코드의 BusinessException이 발생해야 한다")
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.USER_NOT_FOUND);
+    }
+
+    @Nested
+    @DisplayName("confirm: 결제 확정")
+    class Confirm {
+
+        @Test
+        @DisplayName("본인의 PENDING 신청을 결제 기한 안에 확정하면 CONFIRMED로 전이하고 응답을 반환한다")
+        void confirm_success() {
+            // given: 14:15 생성 → 기한 14:45, 현재 14:30 (기한 내)
+            Enrollment enrollment = pendingEnrollment(user, CREATED_AT);
+            given(enrollmentRepository.findById(ENROLLMENT_ID)).willReturn(Optional.of(enrollment));
+
+            // when
+            EnrollmentResponse response = enrollmentService.confirm(USER_ID, ENROLLMENT_ID);
+
+            // then
+            assertThat(enrollment.getStatus()).isEqualTo(EnrollmentStatus.CONFIRMED);
+            assertThat(enrollment.getConfirmedAt()).isEqualTo(NOW);
+            assertThat(response.enrollmentId()).isEqualTo(ENROLLMENT_ID);
+            assertThat(response.userId()).isEqualTo(USER_ID);
+            assertThat(response.courseId()).isEqualTo(COURSE_ID);
+            assertThat(response.status()).isEqualTo(EnrollmentStatus.CONFIRMED);
+            assertThat(response.confirmedAt()).isEqualTo(NOW);
+            verify(enrollmentRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("신청이 존재하지 않으면 ENROLLMENT_NOT_FOUND를 던진다")
+        void confirm_notFound() {
+            given(enrollmentRepository.findById(ENROLLMENT_ID)).willReturn(Optional.empty());
+
+            assertThatThrownBy(() -> enrollmentService.confirm(USER_ID, ENROLLMENT_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ENROLLMENT_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("본인의 신청이 아니면 ENROLLMENT_NOT_OWNED를 던진다")
+        void confirm_notOwned() {
+            User other = User.builder().userId("user-999").role(UserRole.ROLE_USER).build();
+            ReflectionTestUtils.setField(other, "id", 2L);
+            Enrollment enrollment = pendingEnrollment(other, CREATED_AT);
+            given(enrollmentRepository.findById(ENROLLMENT_ID)).willReturn(Optional.of(enrollment));
+
+            assertThatThrownBy(() -> enrollmentService.confirm(USER_ID, ENROLLMENT_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ENROLLMENT_NOT_OWNED);
+        }
+
+        @Test
+        @DisplayName("이미 CONFIRMED 상태이면 INVALID_STATUS_FOR_CONFIRM을 던진다")
+        void confirm_invalidStatus() {
+            Enrollment enrollment = pendingEnrollment(user, CREATED_AT);
+            enrollment.confirm(CREATED_AT.plusMinutes(5));    // 이미 확정된 신청
+            given(enrollmentRepository.findById(ENROLLMENT_ID)).willReturn(Optional.of(enrollment));
+
+            assertThatThrownBy(() -> enrollmentService.confirm(USER_ID, ENROLLMENT_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.INVALID_STATUS_FOR_CONFIRM);
+        }
+
+        @Test
+        @DisplayName("결제 기한 30분이 지났으면 PAYMENT_DEADLINE_EXPIRED를 던진다")
+        void confirm_deadlineExpired() {
+            // given: 13:50 생성 → 기한 14:20, 현재 14:30 (기한 초과)
+            Enrollment enrollment = pendingEnrollment(user, LocalDateTime.of(2026, 5, 24, 13, 50));
+            given(enrollmentRepository.findById(ENROLLMENT_ID)).willReturn(Optional.of(enrollment));
+
+            assertThatThrownBy(() -> enrollmentService.confirm(USER_ID, ENROLLMENT_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.PAYMENT_DEADLINE_EXPIRED);
+        }
+
+        private Enrollment pendingEnrollment(User owner, LocalDateTime createdAt) {
+            Enrollment enrollment = Enrollment.pending(owner, course);
+            ReflectionTestUtils.setField(enrollment, "id", ENROLLMENT_ID);
+            ReflectionTestUtils.setField(enrollment, "createdAt", createdAt);
+            ReflectionTestUtils.setField(enrollment, "updatedAt", createdAt);
+            return enrollment;
+        }
     }
 }
