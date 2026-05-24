@@ -13,6 +13,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
@@ -119,5 +122,70 @@ class EnrollmentRepositoryTest {
 
         assertThat(counts).containsEntry(course.getId(), 1L);
         assertThat(counts).doesNotContainKey(empty.getId());
+    }
+
+    @Test
+    @DisplayName("findByCourseAndStatusIn은 해당 강의의 PENDING·CONFIRMED만 페이지로 반환하고 CANCELLED는 제외한다")
+    void findByCourseAndStatusIn_returnsActiveOnly() {
+        persistEnrollment(user, EnrollmentStatus.PENDING);
+        persistEnrollment(persistUser("user-002"), EnrollmentStatus.CONFIRMED);
+        persistEnrollment(persistUser("user-003"), EnrollmentStatus.CANCELLED);
+        em.flush();
+        em.clear();
+
+        Page<Enrollment> page = enrollmentRepository.findByCourseAndStatusIn(course, ACTIVE, PageRequest.of(0, 20));
+
+        assertThat(page.getTotalElements()).isEqualTo(2);
+        assertThat(page.getContent())
+                .extracting(Enrollment::getStatus)
+                .containsExactlyInAnyOrder(EnrollmentStatus.PENDING, EnrollmentStatus.CONFIRMED);
+    }
+
+    @Test
+    @DisplayName("findByCourseAndStatusIn은 다른 강의의 신청은 포함하지 않는다")
+    void findByCourseAndStatusIn_scopedToCourse() {
+        User creator = em.persist(User.builder().userId("creator-other").role(UserRole.ROLE_CREATOR).build());
+        Course other = em.persist(Course.draftOf(creator, "다른 강의", "설명", 10000, 5, START, END));
+        persistEnrollment(user, course, EnrollmentStatus.PENDING);
+        persistEnrollment(persistUser("user-002"), other, EnrollmentStatus.CONFIRMED);
+        em.flush();
+        em.clear();
+
+        Page<Enrollment> page = enrollmentRepository.findByCourseAndStatusIn(course, ACTIVE, PageRequest.of(0, 20));
+
+        assertThat(page.getTotalElements()).isEqualTo(1);
+        assertThat(page.getContent().get(0).getUser().getUserId()).isEqualTo("user-001");
+    }
+
+    @Test
+    @DisplayName("findByCourseAndStatusIn은 EntityGraph로 user를 함께 로드해 userId 접근 시 추가 조회가 없다")
+    void findByCourseAndStatusIn_fetchesUser() {
+        persistEnrollment(user, EnrollmentStatus.PENDING);
+        em.flush();
+        em.clear();
+
+        Page<Enrollment> page = enrollmentRepository.findByCourseAndStatusIn(course, ACTIVE, PageRequest.of(0, 20));
+
+        Enrollment loaded = page.getContent().get(0);
+        // user 연관이 EntityGraph로 즉시 로드되어 영속성 컨텍스트 초기화 후에도 식별자 접근이 가능하다.
+        assertThat(loaded.getUser().getUserId()).isEqualTo("user-001");
+    }
+
+    @Test
+    @DisplayName("findByCourseAndStatusIn은 페이지 크기·번호 메타데이터를 그대로 반영한다")
+    void findByCourseAndStatusIn_paging() {
+        for (int i = 0; i < 3; i++) {
+            persistEnrollment(persistUser("user-page-" + i), EnrollmentStatus.PENDING);
+        }
+        em.flush();
+
+        Pageable pageable = PageRequest.of(0, 2);
+        Page<Enrollment> page = enrollmentRepository.findByCourseAndStatusIn(course, ACTIVE, pageable);
+
+        assertThat(page.getTotalElements()).isEqualTo(3);
+        assertThat(page.getTotalPages()).isEqualTo(2);
+        assertThat(page.getSize()).isEqualTo(2);
+        assertThat(page.getNumber()).isZero();
+        assertThat(page.getContent()).hasSize(2);
     }
 }
