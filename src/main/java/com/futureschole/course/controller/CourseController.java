@@ -6,6 +6,7 @@ import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.CourseCreateRequest;
 import com.futureschole.course.dto.request.CourseStatusChangeRequest;
 import com.futureschole.course.dto.response.CourseDetailResponse;
+import com.futureschole.course.dto.response.PageCourseEnrollmentItem;
 import com.futureschole.course.dto.response.PageCourseSummary;
 import com.futureschole.course.entity.type.CourseStatus;
 import com.futureschole.course.service.CourseService;
@@ -125,5 +126,25 @@ public class CourseController {
         CourseDetailResponse data = courseService.getDetail(courseId);
         return ResponseEntity.status(HttpStatus.OK)
                 .body(ApiResponse.success(HttpStatus.OK, data, "강의 상세 조회에 성공했습니다."));
+    }
+
+    @Operation(
+            summary = "강의별 수강생 목록 조회 (강사용)",
+            description = "ROLE_CREATOR가 본인 강의의 활성 수강생(PENDING·CONFIRMED)을 페이지네이션으로 조회한다. 본인이 작성한 강의가 아니면 403으로 거부한다."
+    )
+    @GetMapping("/{courseId}/enrollments")
+    public ResponseEntity<ApiResponse<PageCourseEnrollmentItem>> getCourseEnrollments(
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader("X-User-Role") String role,
+            @PathVariable Long courseId,
+            @PageableDefault(size = 20) Pageable pageable) {
+
+        if (!"ROLE_CREATOR".equals(role)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+
+        PageCourseEnrollmentItem data = courseService.getCourseEnrollments(courseId, userId, pageable);
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(ApiResponse.success(HttpStatus.OK, data, "수강생 목록 조회에 성공했습니다."));
     }
 }
