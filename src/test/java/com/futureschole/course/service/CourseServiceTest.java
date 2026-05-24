@@ -5,9 +5,12 @@ import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.CourseCreateRequest;
 import com.futureschole.course.dto.request.CourseStatusChangeRequest;
 import com.futureschole.course.dto.response.CourseDetailResponse;
+import com.futureschole.course.dto.response.CourseEnrollmentItemResponse;
 import com.futureschole.course.dto.response.CourseSummaryResponse;
+import com.futureschole.course.dto.response.PageCourseEnrollmentItem;
 import com.futureschole.course.dto.response.PageCourseSummary;
 import com.futureschole.course.entity.Course;
+import com.futureschole.course.entity.Enrollment;
 import com.futureschole.course.entity.User;
 import com.futureschole.course.entity.type.CourseStatus;
 import com.futureschole.course.entity.type.EnrollmentStatus;
@@ -618,6 +621,103 @@ class CourseServiceTest {
                     .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_NOT_OWNED);
 
             assertThat(draft.getStatus()).isEqualTo(CourseStatus.DRAFT);
+        }
+    }
+
+    @Nested
+    @DisplayName("강의별 수강생 목록 조회")
+    class GetCourseEnrollments {
+
+        private static final Long COURSE_ID = 100L;
+        private static final List<EnrollmentStatus> ACTIVE =
+                List.of(EnrollmentStatus.PENDING, EnrollmentStatus.CONFIRMED);
+
+        private Course existingCourse;
+
+        @BeforeEach
+        void setUpGetCourseEnrollments() {
+            existingCourse = Course.draftOf(
+                    creator, "요리 7일 코스", "설명", 33000, 30, DEFAULT_START, DEFAULT_END);
+            ReflectionTestUtils.setField(existingCourse, "id", COURSE_ID);
+            ReflectionTestUtils.setField(existingCourse, "status", CourseStatus.OPEN);
+        }
+
+        private Enrollment enrollment(Long id, String userId, EnrollmentStatus status,
+                                      LocalDateTime confirmedAt, LocalDateTime createdAt) {
+            User user = User.builder().userId(userId).role(UserRole.ROLE_USER).build();
+            Enrollment enrollment = Enrollment.pending(user, existingCourse);
+            ReflectionTestUtils.setField(enrollment, "id", id);
+            ReflectionTestUtils.setField(enrollment, "status", status);
+            ReflectionTestUtils.setField(enrollment, "confirmedAt", confirmedAt);
+            ReflectionTestUtils.setField(enrollment, "createdAt", createdAt);
+            return enrollment;
+        }
+
+        @Test
+        @DisplayName("본인 강의면 활성 신청 페이지를 항목으로 매핑해 반환한다")
+        void getCourseEnrollments_success() {
+            // given
+            Pageable pageable = PageRequest.of(0, 20);
+            LocalDateTime createdAt = LocalDateTime.of(2026, 5, 22, 14, 15);
+            LocalDateTime confirmedAt = LocalDateTime.of(2026, 5, 22, 14, 30);
+            Enrollment pending = enrollment(101L, "user-001", EnrollmentStatus.PENDING, null, createdAt);
+            Enrollment confirmed = enrollment(102L, "user-002", EnrollmentStatus.CONFIRMED, confirmedAt, createdAt);
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(existingCourse));
+            given(enrollmentRepository.findByCourseAndStatusIn(existingCourse, ACTIVE, pageable))
+                    .willReturn(new PageImpl<>(List.of(pending, confirmed), pageable, 2));
+
+            // when
+            PageCourseEnrollmentItem result =
+                    courseService.getCourseEnrollments(COURSE_ID, CREATOR_USER_ID, pageable);
+
+            // then
+            assertThat(result.page()).isZero();
+            assertThat(result.size()).isEqualTo(20);
+            assertThat(result.totalElements()).isEqualTo(2);
+            assertThat(result.totalPages()).isEqualTo(1);
+            assertThat(result.content())
+                    .extracting(CourseEnrollmentItemResponse::enrollmentId,
+                            CourseEnrollmentItemResponse::userId,
+                            CourseEnrollmentItemResponse::status,
+                            CourseEnrollmentItemResponse::confirmedAt)
+                    .containsExactly(
+                            org.assertj.core.groups.Tuple.tuple(101L, "user-001", EnrollmentStatus.PENDING, null),
+                            org.assertj.core.groups.Tuple.tuple(102L, "user-002", EnrollmentStatus.CONFIRMED, confirmedAt));
+        }
+
+        @Test
+        @DisplayName("강의가 존재하지 않으면 COURSE_NOT_FOUND를 던지고 신청은 조회하지 않는다")
+        void getCourseEnrollments_courseNotFound() {
+            // given
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.empty());
+
+            // when & then
+            assertThatThrownBy(() ->
+                    courseService.getCourseEnrollments(COURSE_ID, CREATOR_USER_ID, PageRequest.of(0, 20)))
+                    .as("존재하지 않는 강의의 수강생 목록 조회는 COURSE_NOT_FOUND 코드의 BusinessException이 발생해야 한다")
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_NOT_FOUND);
+
+            verify(enrollmentRepository, never()).findByCourseAndStatusIn(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("본인이 작성한 강의가 아니면 COURSE_NOT_OWNED를 던지고 신청은 조회하지 않는다")
+        void getCourseEnrollments_courseNotOwned() {
+            // given
+            User otherCreator = User.builder().userId("creator-999").role(UserRole.ROLE_CREATOR).build();
+            ReflectionTestUtils.setField(otherCreator, "id", 2L);
+            ReflectionTestUtils.setField(existingCourse, "creator", otherCreator);
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(existingCourse));
+
+            // when & then
+            assertThatThrownBy(() ->
+                    courseService.getCourseEnrollments(COURSE_ID, CREATOR_USER_ID, PageRequest.of(0, 20)))
+                    .as("타인 강의의 수강생 목록 조회는 COURSE_NOT_OWNED 코드의 BusinessException이 발생해야 한다")
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_NOT_OWNED);
+
+            verify(enrollmentRepository, never()).findByCourseAndStatusIn(any(), any(), any());
         }
     }
 }
