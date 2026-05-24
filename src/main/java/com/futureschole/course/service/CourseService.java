@@ -4,9 +4,12 @@ import com.futureschole.course.common.BusinessException;
 import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.CourseCreateRequest;
 import com.futureschole.course.dto.response.CourseDetailResponse;
+import com.futureschole.course.dto.response.CourseEnrollmentItemResponse;
 import com.futureschole.course.dto.response.CourseSummaryResponse;
+import com.futureschole.course.dto.response.PageCourseEnrollmentItem;
 import com.futureschole.course.dto.response.PageCourseSummary;
 import com.futureschole.course.entity.Course;
+import com.futureschole.course.entity.Enrollment;
 import com.futureschole.course.entity.User;
 import com.futureschole.course.entity.type.CourseStatus;
 import com.futureschole.course.entity.type.EnrollmentStatus;
@@ -217,6 +220,35 @@ public class CourseService {
                 Math.toIntExact(enrolledCounts.getOrDefault(course.getId(), 0L)),
                 Math.toIntExact(waitingCounts.getOrDefault(course.getId(), 0L)));
         return PageCourseSummary.from(page, mapper);
+    }
+
+    /**
+     * 강사가 자신의 강의에 신청한 활성 수강생 목록을 페이지로 조회한다.
+     *
+     * <p>강의를 찾은 뒤 요청자가 작성자 본인인지 확인하고, 활성 신청
+     * ({@link EnrollmentStatus#PENDING}+{@link EnrollmentStatus#CONFIRMED})만 페이지 단위로 모아 항목
+     * 응답으로 변환한다. 취소된 신청은 목록에 담지 않는다. 권한(역할) 검증은 컨트롤러에서 끝나므로 본
+     * 메서드는 강의 소유권만 검사한다.
+     *
+     * @param courseId         조회할 강의 식별자
+     * @param requesterUserId  요청자의 외부 식별자({@code X-User-Id} 헤더 값)
+     * @param pageable         페이지·정렬 정보
+     * @return 활성 신청 항목으로 채워진 수강생 목록 페이지
+     * @throws BusinessException 강의가 없으면 {@link ErrorCode#COURSE_NOT_FOUND},
+     *                           요청자가 작성자가 아니면 {@link ErrorCode#COURSE_NOT_OWNED}
+     */
+    @Transactional(readOnly = true)
+    public PageCourseEnrollmentItem getCourseEnrollments(
+            Long courseId, String requesterUserId, Pageable pageable) {
+        Course course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
+
+        if (!course.getCreator().getUserId().equals(requesterUserId)) {
+            throw new BusinessException(ErrorCode.COURSE_NOT_OWNED);
+        }
+
+        Page<Enrollment> page = enrollmentRepository.findByCourseAndStatusIn(course, ACTIVE_STATUSES, pageable);
+        return PageCourseEnrollmentItem.from(page, CourseEnrollmentItemResponse::from);
     }
 
     /** 강의별 집계 프로젝션 목록을 {@code (강의 ID, 건수)} 맵으로 모은다. */
