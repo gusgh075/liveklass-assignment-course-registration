@@ -48,7 +48,15 @@ public enum ErrorCode {
     COURSE_NOT_OWNED(240301, HttpStatus.FORBIDDEN, "본인이 작성한 강의가 아닙니다."),
 
     /** {@code DRAFT} 이외 상태의 강의를 수정 시도. */
-    COURSE_NOT_EDITABLE(240902, HttpStatus.CONFLICT, "DRAFT 상태의 강의만 수정할 수 있습니다.");
+    COURSE_NOT_EDITABLE(240902, HttpStatus.CONFLICT, "DRAFT 상태의 강의만 수정할 수 있습니다."),
+
+    // ============ Enrollment (3xxxxx) ============
+
+    /** 동일 강의에 활성 신청(`PENDING`/`CONFIRMED`)이나 대기열 진입이 이미 존재. */
+    DUPLICATE_ACTIVE_ENROLLMENT(340901, HttpStatus.CONFLICT, "이미 활성 상태의 수강 신청이 존재합니다."),
+
+    /** 강의 상태가 {@code OPEN}이 아니라 신청을 받을 수 없음. */
+    COURSE_NOT_OPEN_FOR_ENROLLMENT(340902, HttpStatus.CONFLICT, "현재 신청을 받지 않는 강의입니다.");
 
     /** 6자리 도메인 에러 식별 정수. {@code D HHH SS}(도메인 prefix·HTTP 상태·일련번호) 결합. */
     private final int code;
