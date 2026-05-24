@@ -12,6 +12,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -65,5 +66,16 @@ public class CourseController {
         CourseDetailResponse data = courseService.update(userId, courseId, request);
         return ResponseEntity.status(HttpStatus.OK)
                 .body(ApiResponse.success(HttpStatus.OK, data, "강의가 수정되었습니다."));
+    }
+
+    @Operation(
+            summary = "강의 상세 조회",
+            description = "강의 단건의 상세 정보를 반환한다. 인증 없이 누구나 조회할 수 있으며, 현재 신청 인원(PENDING+CONFIRMED)과 대기 인원이 함께 담긴다."
+    )
+    @GetMapping("/{courseId}")
+    public ResponseEntity<ApiResponse<CourseDetailResponse>> getDetail(@PathVariable Long courseId) {
+        CourseDetailResponse data = courseService.getDetail(courseId);
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(ApiResponse.success(HttpStatus.OK, data, "강의 상세 조회에 성공했습니다."));
     }
 }
