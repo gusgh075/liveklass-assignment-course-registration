@@ -90,4 +90,17 @@ public class Enrollment extends BaseTimeEntity {
     public static Enrollment pending(User user, Course course) {
         return new Enrollment(user, course, EnrollmentStatus.PENDING);
     }
+
+    /**
+     * 결제 확정 상태로 전이한다.
+     *
+     * <p>상태를 {@link EnrollmentStatus#CONFIRMED}로 바꾸고 확정 시각을 기록한다. 전이 가능 여부
+     * 검증(현재 상태·결제 기한)은 서비스에서 끝내며, 이 메서드는 전달받은 값만 반영한다.
+     *
+     * @param now 결제 확정 시각으로 기록할 시각
+     */
+    public void confirm(LocalDateTime now) {
+        this.status = EnrollmentStatus.CONFIRMED;
+        this.confirmedAt = now;
+    }
 }

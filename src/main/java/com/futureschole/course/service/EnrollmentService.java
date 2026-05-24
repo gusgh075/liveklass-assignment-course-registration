@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -43,6 +44,7 @@ public class EnrollmentService {
     private final CourseRepository courseRepository;
     private final EnrollmentRepository enrollmentRepository;
     private final WaitlistRepository waitlistRepository;
+    private final Clock clock;
 
     /**
      * 수강 신청을 접수한다.
@@ -90,7 +92,7 @@ public class EnrollmentService {
 
     /** 정원 마감: 대기열에 등록하고 현재 대기 인원 수를 1-based 순번으로 반환한다. */
     private EnrollmentCreateResponse joinWaitlist(User user, Course course) {
-        Waitlist saved = waitlistRepository.save(Waitlist.enqueue(user, course, LocalDateTime.now()));
+        Waitlist saved = waitlistRepository.save(Waitlist.enqueue(user, course, LocalDateTime.now(clock)));
         int position = waitlistRepository.countByCourse(course);
         return EnrollmentCreateResponse.waitlisted(saved.getId(), course.getId(), position);
     }
