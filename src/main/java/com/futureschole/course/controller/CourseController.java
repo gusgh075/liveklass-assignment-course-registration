@@ -96,6 +96,10 @@ public class CourseController {
                 .body(ApiResponse.success(HttpStatus.OK, data, "강의가 수정되었습니다."));
     }
 
+    @Operation(
+            summary = "강의 상태 변경 (오픈·마감)",
+            description = "ROLE_CREATOR가 본인의 강의를 오픈(DRAFT→OPEN) 또는 마감(OPEN→CLOSED)한다. 허용되지 않은 전이나 종료일이 지난 강의의 오픈은 409로 거부한다."
+    )
     @PatchMapping("/{courseId}/status")
     public ResponseEntity<ApiResponse<CourseDetailResponse>> changeStatus(
             @RequestHeader("X-User-Id") String userId,
@@ -103,7 +107,13 @@ public class CourseController {
             @PathVariable Long courseId,
             @Valid @RequestBody CourseStatusChangeRequest request) {
 
-        throw new UnsupportedOperationException("not implemented");
+        if (!"ROLE_CREATOR".equals(role)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+
+        CourseDetailResponse data = courseService.changeStatus(userId, courseId, request.status());
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(ApiResponse.success(HttpStatus.OK, data, "강의 상태가 변경되었습니다."));
     }
 
     @Operation(
