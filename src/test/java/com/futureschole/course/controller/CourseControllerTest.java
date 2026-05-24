@@ -27,6 +27,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -176,6 +177,141 @@ class CourseControllerTest {
                     .andExpect(jsonPath("$.error.message").value("USER_NOT_FOUND"));
 
             verify(courseService, never()).create(any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("PUT /courses/{courseId}")
+    class Update {
+
+        private static final Long COURSE_ID = 100L;
+
+        @Test
+        @DisplayName("ROLE_CREATOR가 본인 DRAFT 강의를 수정하면 200과 수정된 강의 상세를 반환한다")
+        void update_success() throws Exception {
+            // given
+            LocalDateTime now = LocalDateTime.of(2026, 5, 24, 14, 30);
+            CourseDetailResponse responseBody = new CourseDetailResponse(
+                    COURSE_ID,
+                    CREATOR_USER_ID,
+                    defaultRequest.title(),
+                    defaultRequest.description(),
+                    defaultRequest.price(),
+                    defaultRequest.capacity(),
+                    0,
+                    0,
+                    DEFAULT_START,
+                    DEFAULT_END,
+                    CourseStatus.DRAFT,
+                    now,
+                    now
+            );
+            given(courseService.update(eq(CREATOR_USER_ID), eq(COURSE_ID), any(CourseCreateRequest.class)))
+                    .willReturn(responseBody);
+
+            // when & then
+            mockMvc.perform(put("/courses/{courseId}", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(defaultRequest)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.id").value(100))
+                    .andExpect(jsonPath("$.data.creatorId").value(CREATOR_USER_ID))
+                    .andExpect(jsonPath("$.data.title").value(defaultRequest.title()))
+                    .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                    .andExpect(jsonPath("$.error").doesNotExist());
+        }
+
+        @Test
+        @DisplayName("X-User-Role이 ROLE_USER이면 403 FORBIDDEN을 반환하고 서비스는 호출되지 않는다")
+        void update_forbiddenForRoleUser() throws Exception {
+            mockMvc.perform(put("/courses/{courseId}", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_USER")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(defaultRequest)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value(403))
+                    .andExpect(jsonPath("$.error.code").value(140301))
+                    .andExpect(jsonPath("$.error.message").value("FORBIDDEN"));
+
+            verify(courseService, never()).update(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("필수 필드가 누락되거나 범위를 벗어나면 400 VALIDATION_FAILED를 반환한다")
+        void update_validationFailed() throws Exception {
+            Map<String, Object> invalidBody = new HashMap<>();
+            invalidBody.put("title", "");                    // @NotBlank 위반
+            invalidBody.put("description", "desc");
+            invalidBody.put("price", -1);                    // @PositiveOrZero 위반
+            invalidBody.put("capacity", 0);                  // @Min(1) 위반
+            invalidBody.put("startDate", DEFAULT_START.toString());
+            invalidBody.put("endDate", DEFAULT_END.toString());
+
+            mockMvc.perform(put("/courses/{courseId}", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(invalidBody)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value(400))
+                    .andExpect(jsonPath("$.error.code").value(140001))
+                    .andExpect(jsonPath("$.error.message").value("VALIDATION_FAILED"))
+                    .andExpect(jsonPath("$.error.details").isArray());
+
+            verify(courseService, never()).update(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("서비스가 COURSE_NOT_FOUND를 던지면 404와 해당 에러 코드를 반환한다")
+        void update_courseNotFound() throws Exception {
+            given(courseService.update(eq(CREATOR_USER_ID), eq(COURSE_ID), any(CourseCreateRequest.class)))
+                    .willThrow(new BusinessException(ErrorCode.COURSE_NOT_FOUND));
+
+            mockMvc.perform(put("/courses/{courseId}", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(defaultRequest)))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value(404))
+                    .andExpect(jsonPath("$.error.code").value(240401))
+                    .andExpect(jsonPath("$.error.message").value("COURSE_NOT_FOUND"));
+        }
+
+        @Test
+        @DisplayName("서비스가 COURSE_NOT_EDITABLE을 던지면 409와 해당 에러 코드를 반환한다")
+        void update_courseNotEditable() throws Exception {
+            given(courseService.update(eq(CREATOR_USER_ID), eq(COURSE_ID), any(CourseCreateRequest.class)))
+                    .willThrow(new BusinessException(ErrorCode.COURSE_NOT_EDITABLE));
+
+            mockMvc.perform(put("/courses/{courseId}", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(defaultRequest)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value(409))
+                    .andExpect(jsonPath("$.error.code").value(240902))
+                    .andExpect(jsonPath("$.error.message").value("COURSE_NOT_EDITABLE"));
+        }
+
+        @Test
+        @DisplayName("인증 헤더가 누락되면 기존 핸들러가 USER_NOT_FOUND로 변환해 응답한다")
+        void update_missingAuthHeader() throws Exception {
+            mockMvc.perform(put("/courses/{courseId}", COURSE_ID)
+                            .header("X-User-Role", "ROLE_CREATOR")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(defaultRequest)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error.code").value(140003))
+                    .andExpect(jsonPath("$.error.message").value("USER_NOT_FOUND"));
+
+            verify(courseService, never()).update(any(), any(), any());
         }
     }
 }
