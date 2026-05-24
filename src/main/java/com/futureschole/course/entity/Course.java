@@ -130,4 +130,24 @@ public class Course extends BaseTimeEntity {
         this.startDate = startDate;
         this.endDate = endDate;
     }
+
+    /**
+     * 강의를 모집 중 상태로 전환한다.
+     *
+     * <p>상태를 {@link CourseStatus#OPEN}으로만 바꾼다. 현재 상태에서 오픈이 적법한지, 종료일이
+     * 경과하지 않았는지 같은 판단은 서비스가 맡으므로, 이 메서드는 상태만 반영한다.
+     */
+    public void open() {
+        this.status = CourseStatus.OPEN;
+    }
+
+    /**
+     * 강의를 모집 마감 상태로 전환한다.
+     *
+     * <p>상태를 {@link CourseStatus#CLOSED}로만 바꾼다. 전이 적법성 판단은 서비스가 맡으므로, 이
+     * 메서드는 상태만 반영한다.
+     */
+    public void close() {
+        this.status = CourseStatus.CLOSED;
+    }
 }
