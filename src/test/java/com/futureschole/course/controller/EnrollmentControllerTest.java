@@ -6,6 +6,8 @@ import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.EnrollmentCreateRequest;
 import com.futureschole.course.dto.response.EnrollmentCreateResponse;
 import com.futureschole.course.dto.response.EnrollmentResponse;
+import com.futureschole.course.dto.response.MyEnrollmentItemResponse;
+import com.futureschole.course.dto.response.PageMyEnrollmentItem;
 import com.futureschole.course.entity.type.EnrollmentStatus;
 import com.futureschole.course.service.EnrollmentService;
 import org.junit.jupiter.api.DisplayName;
@@ -13,12 +15,14 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -26,6 +30,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -379,6 +384,64 @@ class EnrollmentControllerTest {
                     .andExpect(jsonPath("$.error.message").value("USER_NOT_FOUND"));
 
             verify(enrollmentService, never()).cancel(any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /enrollments/me")
+    class GetMyEnrollments {
+
+        private PageMyEnrollmentItem onePage() {
+            LocalDateTime createdAt = LocalDateTime.of(2026, 5, 24, 14, 15);
+            MyEnrollmentItemResponse item = new MyEnrollmentItemResponse(
+                    ENROLLMENT_ID, COURSE_ID, "Spring Boot 입문", 49000, 30,
+                    EnrollmentStatus.PENDING, null, null, createdAt);
+            return new PageMyEnrollmentItem(List.of(item), 0, 20, 1, 1);
+        }
+
+        @Test
+        @DisplayName("ROLE_USER가 조회하면 200과 내 신청 목록 페이지를 반환한다")
+        void getMyEnrollments_returns200() throws Exception {
+            given(enrollmentService.getMyEnrollments(eq(USER_ID), any(Pageable.class))).willReturn(onePage());
+
+            mockMvc.perform(get("/enrollments/me")
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.content[0].enrollmentId").value(101))
+                    .andExpect(jsonPath("$.data.content[0].courseId").value(1))
+                    .andExpect(jsonPath("$.data.content[0].courseTitle").value("Spring Boot 입문"))
+                    .andExpect(jsonPath("$.data.content[0].status").value("PENDING"))
+                    .andExpect(jsonPath("$.data.totalElements").value(1))
+                    .andExpect(jsonPath("$.error").doesNotExist());
+        }
+
+        @Test
+        @DisplayName("X-User-Role이 ROLE_CREATOR이면 403 FORBIDDEN을 반환하고 서비스는 호출되지 않는다")
+        void getMyEnrollments_forbiddenForRoleCreator() throws Exception {
+            mockMvc.perform(get("/enrollments/me")
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value(403))
+                    .andExpect(jsonPath("$.error.code").value(140301))
+                    .andExpect(jsonPath("$.error.message").value("FORBIDDEN"));
+
+            verify(enrollmentService, never()).getMyEnrollments(any(), any());
+        }
+
+        @Test
+        @DisplayName("인증 헤더가 누락되면 기존 핸들러가 USER_NOT_FOUND로 변환해 응답한다")
+        void getMyEnrollments_missingAuthHeader() throws Exception {
+            mockMvc.perform(get("/enrollments/me")
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error.code").value(140003))
+                    .andExpect(jsonPath("$.error.message").value("USER_NOT_FOUND"));
+
+            verify(enrollmentService, never()).getMyEnrollments(any(), any());
         }
     }
 }
