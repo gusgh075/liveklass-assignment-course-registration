@@ -7,11 +7,16 @@ import com.futureschole.course.dto.response.CourseDetailResponse;
 import com.futureschole.course.entity.Course;
 import com.futureschole.course.entity.User;
 import com.futureschole.course.entity.type.CourseStatus;
+import com.futureschole.course.entity.type.EnrollmentStatus;
 import com.futureschole.course.repository.CourseRepository;
+import com.futureschole.course.repository.EnrollmentRepository;
 import com.futureschole.course.repository.UserRepository;
+import com.futureschole.course.repository.WaitlistRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 /**
  * 강의 도메인 서비스.
@@ -26,6 +31,8 @@ public class CourseService {
 
     private final UserRepository userRepository;
     private final CourseRepository courseRepository;
+    private final EnrollmentRepository enrollmentRepository;
+    private final WaitlistRepository waitlistRepository;
 
     /**
      * 새 강의를 임시저장 상태로 등록한다.
@@ -95,5 +102,28 @@ public class CourseService {
         );
 
         return CourseDetailResponse.from(course, 0, 0);
+    }
+
+    /**
+     * 강의 상세 정보를 신청 인원·대기 인원과 함께 조회한다.
+     *
+     * <p>인증·권한을 따지지 않는 공개 조회로, 강의를 찾은 뒤 활성 신청 인원
+     * ({@link EnrollmentStatus#PENDING}+{@link EnrollmentStatus#CONFIRMED})과 대기열 인원을 각각
+     * 집계해 응답에 담는다.
+     *
+     * @param courseId 조회할 강의 식별자
+     * @return 인원 카운트가 채워진 강의 상세 응답
+     * @throws BusinessException 강의가 없으면 {@link ErrorCode#COURSE_NOT_FOUND}
+     */
+    @Transactional(readOnly = true)
+    public CourseDetailResponse getDetail(Long courseId) {
+        Course course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
+
+        int enrolledCount = enrollmentRepository.countByCourseAndStatusIn(
+                course, List.of(EnrollmentStatus.PENDING, EnrollmentStatus.CONFIRMED));
+        int waitingCount = waitlistRepository.countByCourse(course);
+
+        return CourseDetailResponse.from(course, enrolledCount, waitingCount);
     }
 }
