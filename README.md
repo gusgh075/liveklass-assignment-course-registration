@@ -30,8 +30,8 @@
 | 분류 | 기술 |
 |------|------|
 | **BE** | ![Java 17](https://img.shields.io/badge/Java%2017-007396?style=for-the-badge&logo=openjdk&logoColor=white) ![Spring Boot 3.5.14](https://img.shields.io/badge/Spring%20Boot%203.5.14-6DB33F?style=for-the-badge&logo=springboot&logoColor=white) |
-| **DB** | ![Spring Data JPA](https://img.shields.io/badge/Spring%20Data%20JPA-6DB33F?style=for-the-badge&logo=spring&logoColor=white) ![H2](https://img.shields.io/badge/H2%20Database-1021FF?style=for-the-badge&logoColor=white) ![MySQL](https://img.shields.io/badge/MySQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white) |
-| **Infra** | ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white) ![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white) ![Testcontainers](https://img.shields.io/badge/Testcontainers-2C2D72?style=for-the-badge&logoColor=white) ![Gradle 8.14.4](https://img.shields.io/badge/Gradle%208.14.4-02303A?style=for-the-badge&logo=gradle&logoColor=white) |
+| **DB** | ![Spring Data JPA](https://img.shields.io/badge/Spring%20Data%20JPA-6DB33F?style=for-the-badge&logo=spring&logoColor=white) ![H2](https://img.shields.io/badge/H2%20Database-1021FF?style=for-the-badge&logoColor=white) |
+| **Build** | ![Gradle 8](https://img.shields.io/badge/Gradle%208-02303A?style=for-the-badge&logo=gradle&logoColor=white) |
 | **Test** | ![JUnit 5](https://img.shields.io/badge/JUnit%205-25A162?style=for-the-badge&logo=junit5&logoColor=white) |
 | **Docs** | ![Swagger](https://img.shields.io/badge/Swagger-85EA2D?style=for-the-badge&logo=swagger&logoColor=black) |
 
@@ -147,7 +147,7 @@ java -jar build\libs\course-0.0.1-SNAPSHOT.jar
 ### 14. 동시성 제어 전략
 - **관련 요구사항**: #6 정원 관리 규칙
 - **해석 및 가정**: 다중 사용자가 마지막 자리에 동시 신청하는 경우 정원 초과를 막아야 한다. 락 전략은 명세에 없다.
-- **결정**: **1단계(현재 구현)** — 강의 레코드에 비관적 락을 걸어 신청 카운트 갱신 트랜잭션을 직렬화한다. 보조로 사용자·강의 조합의 활성 상태에 DB 유니크 제약을 두어 중복 신청(### 5)의 race condition도 차단한다. **2단계(향후 마이그레이션)** — 트래픽 확장 시 Redis 기반 분산 락으로 전환을 고려한다. 마이그레이션 이점: ① DB 락 경합 감소로 신청 처리량 향상, ② 트랜잭션 외부 락이므로 DB 커넥션 점유 시간 단축, ③ 다중 인스턴스 환경 지원(JVM 단위 락의 한계 회피), ④ TTL 기반 락으로 데드락 위험 ↓. 단점: 외부 인프라(Redis) 운영 부담 증가 및 락-DB 정합성 별도 보장 필요.
+- **결정**: **1단계(현재 구현)** — 강의 레코드에 비관적 락을 걸어 신청 카운트 갱신 트랜잭션을 직렬화한다. 중복 신청(### 5)은 활성 신청 사전 검증으로 막으며, 그 검증과 카운트가 모두 같은 락 구간 안에서 이뤄지므로 동시 신청 race까지 함께 차단된다. (`(user_id, course_id)`에 DB 유니크 제약은 두지 않는다 — 이유는 `### 5`.) **2단계(향후 마이그레이션)** — 트래픽 확장 시 Redis 기반 분산 락으로 전환을 고려한다. 마이그레이션 이점: ① DB 락 경합 감소로 신청 처리량 향상, ② 트랜잭션 외부 락이므로 DB 커넥션 점유 시간 단축, ③ 다중 인스턴스 환경 지원(JVM 단위 락의 한계 회피), ④ TTL 기반 락으로 데드락 위험 ↓. 단점: 외부 인프라(Redis) 운영 부담 증가 및 락-DB 정합성 별도 보장 필요.
 
 ### 15. 결제 기한 만료 및 새벽 승급 정책
 - **관련 요구사항**: #5 결제 기한 규칙, #10 대기열 기능
@@ -195,22 +195,11 @@ java -jar build\libs\course-0.0.1-SNAPSHOT.jar
 - **결론**: 본 프로젝트의 주기 작업은 만료 데이터의 상태만 바꾸는 짧은 작업이고 분 단위로 자주 돌려야 하므로, 인프라 부담이 적고 다시 돌려도 안전한 `@Scheduled`가 더 적합하다. (조회 시점 lazy check 방식은 새벽처럼 조회가 적은 시간엔 만료 감지가 늦어져 `### 6` 대기열 자동 승급 흐름과 어긋난다.)
 - **향후 확장 여지**: 만료 대상이 수만 건 이상이 되거나 정기 집계·ETL성 작업이 필요해지면 그 단위 작업만 Spring Batch로 분리하면 된다.
 
-### 2. 데이터 접근에 JPA를 선택, 복잡한 조회는 추후 MyBatis로 점진 리팩토링
+### 2. 데이터 접근에 Spring Data JPA 선택
 
-- **배경**: 강의·수강·대기 같은 도메인은 대부분 단순 CRUD에 가깝다. 초기에는 매핑 코드와 기본 쿼리를 자동으로 처리하는 ORM이 개발 속도에 유리하다. 다만 강의 목록의 다중 조건 필터링, 강의별 신청·대기 인원 집계, 화면용 응답에 여러 테이블 정보를 묶는 쿼리처럼 조회가 복잡해지는 화면이 늘어나면 ORM 표현이 어색해지는 경우가 있다.
-- **대안**: JPA / MyBatis
-- **JPA vs MyBatis 비교**:
-
-| 비교 항목 | JPA (Spring Data JPA) | MyBatis |
-|----------|------------------------|---------|
-| 단순 CRUD | Repository 인터페이스만으로 처리 | 매번 SQL과 결과 매핑을 직접 작성 |
-| 도메인 매핑 | 엔티티 ↔ 객체 자동 매핑 | 결과 컬럼을 수동 매핑 |
-| 복잡한 조회 | 동적 조건·다중 조인은 표현이 어색해질 수 있어 별도 도구가 필요해진다 | SQL을 그대로 적어 자유도 높음 |
-| 성능 튜닝 | 자동 생성된 SQL이 의도와 달라질 수 있음 | SQL을 직접 보고 조정 가능 |
-| 학습 부담 | 엔티티 관리 방식·지연 로딩 같은 ORM 개념 학습 필요 | SQL을 알면 비교적 단순 |
-
-- **결론**: 초기 개발은 JPA로 골격을 빠르게 세운다. `### 14`(동시성 제어)의 비관적 락이나 `### 3`(정원 산정)처럼 단순 조건의 조회·갱신은 JPA로 충분하다.
-- **향후 확장 여지**: 강의 목록의 다중 조건 필터링이나 강의별 신청·대기 인원 집계처럼 조회가 복잡해지는 쿼리가 생기면 그 부분만 MyBatis로 점진적으로 옮긴다. 도메인 엔티티 매핑 자체는 JPA에 그대로 두고, 조회 전용 쿼리만 MyBatis로 분리하는 방식을 유지한다.
+- **배경**: 강의·수강·대기 같은 도메인은 대부분 단순 CRUD에 가깝다. 매핑 코드와 기본 쿼리를 자동으로 처리하는 ORM이 개발 속도에 유리하다.
+- **결정**: 데이터 접근은 Spring Data JPA로 통일한다. 엔티티 ↔ 객체 매핑과 기본 CRUD를 Repository 인터페이스로 자동화하고, 동시성 제어(`### 14`)의 비관적 락은 `@Lock`, 정원 산정(`### 3`)·상태 전이 검증처럼 단순 조건의 조회·갱신은 파생 쿼리로 처리한다.
+- **복잡한 조회 처리**: 강의 목록의 상태 필터·페이지네이션, 강의별 신청·대기 인원 집계처럼 조회가 복잡해지는 경우도 JPQL `@Query`(강의 묶음 배치 집계)와 `@EntityGraph`(목록 조회의 N+1 회피)로 JPA 범위 안에서 해결했다. 별도 SQL 매퍼를 도입하지 않고 표준 JPA/JPQL로 충분했다.
 
 ### 3. 패키지 구조에 전통 레이어드(단일 계층 패키지)를 선택
 
@@ -425,36 +414,10 @@ erDiagram
 
 ## 테스트 실행 방법
 
-JUnit 5 기반이며 Gradle Wrapper로 실행합니다. 현재는 `CourseApplicationTests`(컨텍스트 로딩 스모크 테스트)만 존재합니다.
-
-### 전체 테스트
+JUnit 5 기반이며 Gradle Wrapper로 실행합니다. Repository 슬라이스(`@DataJpaTest`), Service 단위(Mockito), Controller 슬라이스(`@WebMvcTest`), 그리고 동시 수강신청을 멀티스레드로 검증하는 동시성 통합 테스트(`@SpringBootTest`).
 
 ```powershell
 .\gradlew.bat test
-```
-
-### 특정 클래스만
-
-```powershell
-.\gradlew.bat test --tests "com.futureschole.course.CourseApplicationTests"
-```
-
-### 특정 메서드만
-
-```powershell
-.\gradlew.bat test --tests "com.futureschole.course.CourseApplicationTests.contextLoads"
-```
-
-와일드카드도 사용할 수 있습니다.
-
-```powershell
-.\gradlew.bat test --tests "*.CourseApplicationTests.context*"
-```
-
-### 컴파일 + 테스트 + 패키징을 한 번에
-
-```powershell
-.\gradlew.bat build
 ```
 
 ### 클린 빌드 (캐시 무시)
