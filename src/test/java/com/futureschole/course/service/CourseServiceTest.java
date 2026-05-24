@@ -3,6 +3,7 @@ package com.futureschole.course.service;
 import com.futureschole.course.common.BusinessException;
 import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.CourseCreateRequest;
+import com.futureschole.course.dto.request.CourseStatusChangeRequest;
 import com.futureschole.course.dto.response.CourseDetailResponse;
 import com.futureschole.course.dto.response.CourseSummaryResponse;
 import com.futureschole.course.dto.response.PageCourseSummary;
@@ -22,7 +23,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
@@ -30,7 +30,10 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -50,6 +53,11 @@ class CourseServiceTest {
     private static final LocalDateTime DEFAULT_START = LocalDateTime.of(2026, 6, 1, 10, 0);
     private static final LocalDateTime DEFAULT_END = LocalDateTime.of(2026, 7, 31, 18, 0);
 
+    /** 고정 기준 시각. 종료일 경과 판정을 결정적으로 만들기 위해 {@link Clock#fixed}로 주입한다. */
+    private static final ZoneId ZONE = ZoneOffset.UTC;
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 5, 24, 14, 30);
+    private static final Clock FIXED_CLOCK = Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZONE);
+
     @Mock
     private UserRepository userRepository;
 
@@ -62,7 +70,6 @@ class CourseServiceTest {
     @Mock
     private WaitlistRepository waitlistRepository;
 
-    @InjectMocks
     private CourseService courseService;
 
     private User creator;
@@ -70,6 +77,9 @@ class CourseServiceTest {
 
     @BeforeEach
     void setUp() {
+        courseService = new CourseService(
+                userRepository, courseRepository, enrollmentRepository, waitlistRepository, FIXED_CLOCK);
+
         creator = User.builder()
                 .userId(CREATOR_USER_ID)
                 .role(UserRole.ROLE_CREATOR)
@@ -469,6 +479,145 @@ class CourseServiceTest {
                     return count;
                 }
             };
+        }
+    }
+
+    @Nested
+    @DisplayName("강의 상태 변경")
+    class ChangeStatus {
+
+        private static final Long COURSE_ID = 100L;
+        private static final LocalDateTime CREATED_AT = LocalDateTime.of(2026, 5, 22, 14, 15);
+
+        private Course course(CourseStatus status, LocalDateTime endDate) {
+            Course course = Course.draftOf(
+                    creator,
+                    "요리 초보자를 위한 간단한 요리 7일 코스",
+                    "1인가구를 위한 하기 부담스럽지 않은 요리를 위주로 소개합니다.",
+                    33000,
+                    30,
+                    DEFAULT_START,
+                    endDate
+            );
+            ReflectionTestUtils.setField(course, "id", COURSE_ID);
+            ReflectionTestUtils.setField(course, "status", status);
+            ReflectionTestUtils.setField(course, "createdAt", CREATED_AT);
+            ReflectionTestUtils.setField(course, "updatedAt", CREATED_AT);
+            return course;
+        }
+
+        @Test
+        @DisplayName("본인의 DRAFT 강의를 OPEN으로 전이하고 신청·대기 인원을 합쳐 상세 응답을 반환한다")
+        void changeStatus_draftToOpen() {
+            // given: 종료일은 현재(NOW) 이후라 오픈 가능
+            Course draft = course(CourseStatus.DRAFT, DEFAULT_END);
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(draft));
+            given(enrollmentRepository.countByCourseAndStatusIn(
+                    draft, List.of(EnrollmentStatus.PENDING, EnrollmentStatus.CONFIRMED)))
+                    .willReturn(0);
+            given(waitlistRepository.countByCourse(draft)).willReturn(0);
+
+            // when
+            CourseDetailResponse response =
+                    courseService.changeStatus(CREATOR_USER_ID, COURSE_ID, CourseStatus.OPEN);
+
+            // then
+            assertThat(draft.getStatus()).isEqualTo(CourseStatus.OPEN);
+            assertThat(response.status()).isEqualTo(CourseStatus.OPEN);
+            assertThat(response.id()).isEqualTo(COURSE_ID);
+            assertThat(response.enrolledCount()).isZero();
+            assertThat(response.waitingCount()).isZero();
+            verify(courseRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("본인의 OPEN 강의를 CLOSED로 전이하고 신청·대기 인원을 합쳐 상세 응답을 반환한다")
+        void changeStatus_openToClosed() {
+            // given
+            Course open = course(CourseStatus.OPEN, DEFAULT_END);
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(open));
+            given(enrollmentRepository.countByCourseAndStatusIn(
+                    open, List.of(EnrollmentStatus.PENDING, EnrollmentStatus.CONFIRMED)))
+                    .willReturn(5);
+            given(waitlistRepository.countByCourse(open)).willReturn(2);
+
+            // when
+            CourseDetailResponse response =
+                    courseService.changeStatus(CREATOR_USER_ID, COURSE_ID, CourseStatus.CLOSED);
+
+            // then
+            assertThat(open.getStatus()).isEqualTo(CourseStatus.CLOSED);
+            assertThat(response.status()).isEqualTo(CourseStatus.CLOSED);
+            assertThat(response.enrolledCount()).isEqualTo(5);
+            assertThat(response.waitingCount()).isEqualTo(2);
+            verify(courseRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("허용되지 않은 전이(OPEN → OPEN 등)이면 COURSE_ILLEGAL_TRANSITION을 던진다")
+        void changeStatus_illegalTransition() {
+            // given: OPEN 강의를 다시 OPEN으로 요청 → 허용되지 않음
+            Course open = course(CourseStatus.OPEN, DEFAULT_END);
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(open));
+
+            // when & then
+            assertThatThrownBy(() -> courseService.changeStatus(CREATOR_USER_ID, COURSE_ID, CourseStatus.OPEN))
+                    .as("허용되지 않은 전이는 COURSE_ILLEGAL_TRANSITION 코드의 BusinessException이 발생해야 한다")
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_ILLEGAL_TRANSITION);
+
+            assertThat(open.getStatus()).isEqualTo(CourseStatus.OPEN);
+        }
+
+        @Test
+        @DisplayName("종료일이 경과한 DRAFT 강의를 OPEN하려 하면 COURSE_ENDED를 던진다")
+        void changeStatus_endedWhenOpening() {
+            // given: 종료일을 현재(NOW)보다 과거로 설정
+            Course draft = course(CourseStatus.DRAFT, NOW.minusDays(1));
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(draft));
+
+            // when & then
+            assertThatThrownBy(() -> courseService.changeStatus(CREATOR_USER_ID, COURSE_ID, CourseStatus.OPEN))
+                    .as("종료일이 경과한 강의를 오픈하면 COURSE_ENDED 코드의 BusinessException이 발생해야 한다")
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_ENDED);
+
+            assertThat(draft.getStatus()).isEqualTo(CourseStatus.DRAFT);
+        }
+
+        @Test
+        @DisplayName("강의가 존재하지 않으면 COURSE_NOT_FOUND를 던진다")
+        void changeStatus_courseNotFound() {
+            // given
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.empty());
+
+            // when & then
+            assertThatThrownBy(() -> courseService.changeStatus(CREATOR_USER_ID, COURSE_ID, CourseStatus.OPEN))
+                    .as("존재하지 않는 강의는 COURSE_NOT_FOUND 코드의 BusinessException이 발생해야 한다")
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("본인이 작성한 강의가 아니면 COURSE_NOT_OWNED를 던진다")
+        void changeStatus_courseNotOwned() {
+            // given
+            User otherCreator = User.builder()
+                    .userId("creator-999")
+                    .role(UserRole.ROLE_CREATOR)
+                    .build();
+            ReflectionTestUtils.setField(otherCreator, "id", 2L);
+            Course draft = course(CourseStatus.DRAFT, DEFAULT_END);
+            ReflectionTestUtils.setField(draft, "creator", otherCreator);
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(draft));
+
+            // when & then
+            assertThatThrownBy(() -> courseService.changeStatus(CREATOR_USER_ID, COURSE_ID, CourseStatus.OPEN))
+                    .as("타인의 강의 상태 변경은 COURSE_NOT_OWNED 코드의 BusinessException이 발생해야 한다")
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_NOT_OWNED);
+
+            assertThat(draft.getStatus()).isEqualTo(CourseStatus.DRAFT);
         }
     }
 }

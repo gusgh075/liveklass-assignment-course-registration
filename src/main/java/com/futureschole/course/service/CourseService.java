@@ -21,6 +21,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -45,6 +47,7 @@ public class CourseService {
     private final CourseRepository courseRepository;
     private final EnrollmentRepository enrollmentRepository;
     private final WaitlistRepository waitlistRepository;
+    private final Clock clock;
 
     /**
      * 새 강의를 임시저장 상태로 등록한다.
@@ -114,6 +117,20 @@ public class CourseService {
         );
 
         return CourseDetailResponse.from(course, 0, 0);
+    }
+
+    /**
+     * 강의 상태를 변경한다(미구현 스텁).
+     *
+     * <p>실제 전이 규칙과 응답 집계는 후속 단계에서 채운다.
+     *
+     * @param userId   요청자의 외부 식별자
+     * @param courseId 상태를 변경할 강의 식별자
+     * @param target   전이 목표 상태
+     * @return 상태 변경 후 강의 상세 응답
+     */
+    public CourseDetailResponse changeStatus(String userId, Long courseId, CourseStatus target) {
+        throw new UnsupportedOperationException("not implemented");
     }
 
     /**
