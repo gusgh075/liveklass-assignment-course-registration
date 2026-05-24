@@ -19,6 +19,7 @@ import com.futureschole.course.repository.UserRepository;
 import com.futureschole.course.repository.WaitlistRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -181,6 +182,61 @@ public class EnrollmentService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
         Page<Enrollment> page = enrollmentRepository.findByUser(user, pageable);
         return PageMyEnrollmentItem.from(page, MyEnrollmentItemResponse::from);
+    }
+
+    /**
+     * 결제 기한이 지난 결제 대기 신청을 일괄 취소한다.
+     *
+     * <p>스케줄러가 주기적으로 호출한다. {@link EnrollmentStatus#PENDING} 중 생성 후 결제 기한(30분)이
+     * 지난 신청을 찾아 {@link EnrollmentStatus#CANCELLED}로 전이한다(취소 시각 기록). 더티 체킹으로 반영된다.
+     *
+     * @return 만료 처리된 신청 수
+     */
+    public int expirePendingPayments() {
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime threshold = now.minusMinutes(PAYMENT_DEADLINE_MINUTES);
+        List<Enrollment> expired = enrollmentRepository.findByStatusAndCreatedAtBefore(
+                EnrollmentStatus.PENDING, threshold);
+        expired.forEach(enrollment -> enrollment.cancel(now));
+        return expired.size();
+    }
+
+    /**
+     * 대기열에 사람이 있는 강의의 식별자를 조회한다(자동 승급 대상 선별용).
+     *
+     * @return 대기 인원이 있는 강의 식별자 목록
+     */
+    @Transactional(readOnly = true)
+    public List<Long> findWaitlistedCourseIds() {
+        return waitlistRepository.findDistinctCourseIds();
+    }
+
+    /**
+     * 한 강의의 빈 자리만큼 대기열 헤드를 결제 대기 신청으로 승급한다.
+     *
+     * <p>강의를 비관적 락으로 조회해 신규 신청과 정원 다툼을 직렬화한다. 강의가 {@code OPEN}일 때만
+     * 처리하며, (정원 - 활성 신청 수)만큼 진입 시각이 이른 대기자부터 새 {@code PENDING} 신청을 만들고
+     * (결제 기한 30분이 새로 시작) 해당 대기열 레코드를 제거한다. 자리가 없거나 강의가 모집 상태가 아니면
+     * 아무 일도 하지 않는다.
+     *
+     * @param courseId 승급을 시도할 강의 식별자
+     */
+    public void promoteCourse(Long courseId) {
+        Course course = courseRepository.findByIdForUpdate(courseId).orElse(null);
+        if (course == null || course.getStatus() != CourseStatus.OPEN) {
+            return;
+        }
+        int activeCount = enrollmentRepository.countByCourseAndStatusIn(course, ACTIVE_STATUSES);
+        int available = course.getCapacity() - activeCount;
+        if (available <= 0) {
+            return;
+        }
+        List<Waitlist> heads = waitlistRepository.findByCourseOrderByEnteredAtAsc(
+                course, PageRequest.of(0, available));
+        for (Waitlist head : heads) {
+            enrollmentRepository.save(Enrollment.pending(head.getUser(), course));
+            waitlistRepository.delete(head);
+        }
     }
 
     /** 정원 내 신청: {@code PENDING} 레코드를 만들고 생성 시각 + 30분을 결제 기한으로 반환한다. */
