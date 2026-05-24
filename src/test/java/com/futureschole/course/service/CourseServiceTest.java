@@ -7,9 +7,12 @@ import com.futureschole.course.dto.response.CourseDetailResponse;
 import com.futureschole.course.entity.Course;
 import com.futureschole.course.entity.User;
 import com.futureschole.course.entity.type.CourseStatus;
+import com.futureschole.course.entity.type.EnrollmentStatus;
 import com.futureschole.course.entity.type.UserRole;
 import com.futureschole.course.repository.CourseRepository;
+import com.futureschole.course.repository.EnrollmentRepository;
 import com.futureschole.course.repository.UserRepository;
+import com.futureschole.course.repository.WaitlistRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -22,6 +25,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,6 +47,12 @@ class CourseServiceTest {
 
     @Mock
     private CourseRepository courseRepository;
+
+    @Mock
+    private EnrollmentRepository enrollmentRepository;
+
+    @Mock
+    private WaitlistRepository waitlistRepository;
 
     @InjectMocks
     private CourseService courseService;
@@ -272,6 +282,81 @@ class CourseServiceTest {
                     .as("DRAFT가 아닌 강의를 수정하면 COURSE_NOT_EDITABLE 코드의 BusinessException이 발생해야 한다")
                     .isInstanceOf(BusinessException.class)
                     .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_NOT_EDITABLE);
+        }
+    }
+
+    @Nested
+    @DisplayName("강의 상세 조회")
+    class GetDetail {
+
+        private static final Long COURSE_ID = 100L;
+        private static final LocalDateTime CREATED_AT = LocalDateTime.of(2026, 5, 22, 14, 15);
+
+        private Course existingCourse;
+
+        @BeforeEach
+        void setUpGetDetail() {
+            existingCourse = Course.draftOf(
+                    creator,
+                    "요리 초보자를 위한 간단한 요리 7일 코스",
+                    "1인가구를 위한 하기 부담스럽지 않은 요리를 위주로 소개합니다.",
+                    33000,
+                    30,
+                    DEFAULT_START,
+                    DEFAULT_END
+            );
+            ReflectionTestUtils.setField(existingCourse, "id", COURSE_ID);
+            ReflectionTestUtils.setField(existingCourse, "status", CourseStatus.OPEN);
+            ReflectionTestUtils.setField(existingCourse, "createdAt", CREATED_AT);
+            ReflectionTestUtils.setField(existingCourse, "updatedAt", CREATED_AT);
+        }
+
+        @Test
+        @DisplayName("강의가 존재하면 신청 인원·대기 인원 카운트를 합쳐 상세 응답을 반환한다")
+        void getDetail_success() {
+            // given
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(existingCourse));
+            given(enrollmentRepository.countByCourseAndStatusIn(
+                    existingCourse, List.of(EnrollmentStatus.PENDING, EnrollmentStatus.CONFIRMED)))
+                    .willReturn(7);
+            given(waitlistRepository.countByCourse(existingCourse)).willReturn(3);
+
+            // when
+            CourseDetailResponse response = courseService.getDetail(COURSE_ID);
+
+            // then
+            CourseDetailResponse expected = new CourseDetailResponse(
+                    COURSE_ID,
+                    CREATOR_USER_ID,
+                    existingCourse.getTitle(),
+                    existingCourse.getDescription(),
+                    existingCourse.getPrice(),
+                    existingCourse.getCapacity(),
+                    7,
+                    3,
+                    DEFAULT_START,
+                    DEFAULT_END,
+                    CourseStatus.OPEN,
+                    CREATED_AT,
+                    CREATED_AT
+            );
+            assertThat(response).usingRecursiveComparison().isEqualTo(expected);
+        }
+
+        @Test
+        @DisplayName("강의가 존재하지 않으면 COURSE_NOT_FOUND를 던지고 카운트는 조회하지 않는다")
+        void getDetail_courseNotFound() {
+            // given
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.empty());
+
+            // when & then
+            assertThatThrownBy(() -> courseService.getDetail(COURSE_ID))
+                    .as("존재하지 않는 강의를 조회하면 COURSE_NOT_FOUND 코드의 BusinessException이 발생해야 한다")
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COURSE_NOT_FOUND);
+
+            verify(enrollmentRepository, never()).countByCourseAndStatusIn(any(), any());
+            verify(waitlistRepository, never()).countByCourse(any());
         }
     }
 }
