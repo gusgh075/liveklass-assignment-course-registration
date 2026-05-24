@@ -308,4 +308,86 @@ class EnrollmentServiceTest {
             return enrollment;
         }
     }
+
+    @Nested
+    @DisplayName("cancel: 수강 취소")
+    class Cancel {
+
+        @Test
+        @DisplayName("본인의 CONFIRMED 신청을 환불창 안에 취소하면 CANCELLED로 전이하고 응답을 반환한다")
+        void cancel_success() {
+            // given: 확정 5/24 14:00 → 환불창 만료 5/31 14:00, 현재 5/24 14:30 (환불창 내)
+            Enrollment enrollment = confirmedEnrollment(user, LocalDateTime.of(2026, 5, 24, 14, 0));
+            given(enrollmentRepository.findById(ENROLLMENT_ID)).willReturn(Optional.of(enrollment));
+
+            // when
+            EnrollmentResponse response = enrollmentService.cancel(USER_ID, ENROLLMENT_ID);
+
+            // then
+            assertThat(enrollment.getStatus()).isEqualTo(EnrollmentStatus.CANCELLED);
+            assertThat(enrollment.getCancelledAt()).isEqualTo(NOW);
+            assertThat(response.enrollmentId()).isEqualTo(ENROLLMENT_ID);
+            assertThat(response.userId()).isEqualTo(USER_ID);
+            assertThat(response.courseId()).isEqualTo(COURSE_ID);
+            assertThat(response.status()).isEqualTo(EnrollmentStatus.CANCELLED);
+            assertThat(response.cancelledAt()).isEqualTo(NOW);
+            verify(enrollmentRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("신청이 존재하지 않으면 ENROLLMENT_NOT_FOUND를 던진다")
+        void cancel_notFound() {
+            given(enrollmentRepository.findById(ENROLLMENT_ID)).willReturn(Optional.empty());
+
+            assertThatThrownBy(() -> enrollmentService.cancel(USER_ID, ENROLLMENT_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ENROLLMENT_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("본인의 신청이 아니면 ENROLLMENT_NOT_OWNED를 던진다")
+        void cancel_notOwned() {
+            User other = User.builder().userId("user-999").role(UserRole.ROLE_USER).build();
+            ReflectionTestUtils.setField(other, "id", 2L);
+            Enrollment enrollment = confirmedEnrollment(other, LocalDateTime.of(2026, 5, 24, 14, 0));
+            given(enrollmentRepository.findById(ENROLLMENT_ID)).willReturn(Optional.of(enrollment));
+
+            assertThatThrownBy(() -> enrollmentService.cancel(USER_ID, ENROLLMENT_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ENROLLMENT_NOT_OWNED);
+        }
+
+        @Test
+        @DisplayName("상태가 CONFIRMED가 아니면(예: PENDING) INVALID_STATUS_FOR_CANCEL을 던진다")
+        void cancel_invalidStatus() {
+            Enrollment enrollment = Enrollment.pending(user, course);    // PENDING 상태
+            ReflectionTestUtils.setField(enrollment, "id", ENROLLMENT_ID);
+            given(enrollmentRepository.findById(ENROLLMENT_ID)).willReturn(Optional.of(enrollment));
+
+            assertThatThrownBy(() -> enrollmentService.cancel(USER_ID, ENROLLMENT_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.INVALID_STATUS_FOR_CANCEL);
+        }
+
+        @Test
+        @DisplayName("결제 확정 후 7일이 지났으면 REFUND_WINDOW_EXPIRED를 던진다")
+        void cancel_refundWindowExpired() {
+            // given: 확정 5/17 14:00 → 환불창 만료 5/24 14:00, 현재 5/24 14:30 (환불창 초과)
+            Enrollment enrollment = confirmedEnrollment(user, LocalDateTime.of(2026, 5, 17, 14, 0));
+            given(enrollmentRepository.findById(ENROLLMENT_ID)).willReturn(Optional.of(enrollment));
+
+            assertThatThrownBy(() -> enrollmentService.cancel(USER_ID, ENROLLMENT_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.REFUND_WINDOW_EXPIRED);
+        }
+
+        private Enrollment confirmedEnrollment(User owner, LocalDateTime confirmedAt) {
+            Enrollment enrollment = Enrollment.pending(owner, course);
+            ReflectionTestUtils.setField(enrollment, "id", ENROLLMENT_ID);
+            ReflectionTestUtils.setField(enrollment, "createdAt", confirmedAt.minusMinutes(5));
+            ReflectionTestUtils.setField(enrollment, "updatedAt", confirmedAt);
+            enrollment.confirm(confirmedAt);
+            return enrollment;
+        }
+    }
 }
