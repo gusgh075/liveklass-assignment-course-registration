@@ -69,4 +69,23 @@ public class EnrollmentController {
         return ResponseEntity.status(HttpStatus.OK)
                 .body(ApiResponse.success(HttpStatus.OK, data, "결제가 확정되었습니다."));
     }
+
+    @Operation(
+            summary = "수강 취소",
+            description = "ROLE_USER가 본인의 CONFIRMED 신청을 CANCELLED로 전이한다. 결제 확정 시각으로부터 7일 이내인 신청만 취소할 수 있으며, 취소 시각이 기록되고 정원 산정에서 제외된다."
+    )
+    @PostMapping("/{enrollmentId}/cancel")
+    public ResponseEntity<ApiResponse<EnrollmentResponse>> cancel(
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader("X-User-Role") String role,
+            @PathVariable Long enrollmentId) {
+
+        if (!"ROLE_USER".equals(role)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+
+        EnrollmentResponse data = enrollmentService.cancel(userId, enrollmentId);
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(ApiResponse.success(HttpStatus.OK, data, "수강 신청이 취소되었습니다."));
+    }
 }
