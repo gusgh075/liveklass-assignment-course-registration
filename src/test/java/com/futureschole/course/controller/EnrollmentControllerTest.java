@@ -5,6 +5,8 @@ import com.futureschole.course.common.BusinessException;
 import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.EnrollmentCreateRequest;
 import com.futureschole.course.dto.response.EnrollmentCreateResponse;
+import com.futureschole.course.dto.response.EnrollmentResponse;
+import com.futureschole.course.entity.type.EnrollmentStatus;
 import com.futureschole.course.service.EnrollmentService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -171,6 +173,109 @@ class EnrollmentControllerTest {
                     .andExpect(jsonPath("$.error.message").value("USER_NOT_FOUND"));
 
             verify(enrollmentService, never()).apply(any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /enrollments/{enrollmentId}/confirm")
+    class Confirm {
+
+        private EnrollmentResponse confirmedResponse() {
+            LocalDateTime createdAt = LocalDateTime.of(2026, 5, 24, 14, 15);
+            LocalDateTime confirmedAt = LocalDateTime.of(2026, 5, 24, 14, 30);
+            return new EnrollmentResponse(
+                    ENROLLMENT_ID, USER_ID, COURSE_ID, EnrollmentStatus.CONFIRMED,
+                    confirmedAt, null, createdAt, confirmedAt);
+        }
+
+        @Test
+        @DisplayName("ROLE_USER가 결제 확정에 성공하면 200과 CONFIRMED 신청 정보를 반환한다")
+        void confirm_returns200() throws Exception {
+            given(enrollmentService.confirm(eq(USER_ID), eq(ENROLLMENT_ID))).willReturn(confirmedResponse());
+
+            mockMvc.perform(post("/enrollments/{enrollmentId}/confirm", ENROLLMENT_ID)
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.enrollmentId").value(101))
+                    .andExpect(jsonPath("$.data.userId").value(USER_ID))
+                    .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
+                    .andExpect(jsonPath("$.data.confirmedAt").exists())
+                    .andExpect(jsonPath("$.data.cancelledAt").doesNotExist())
+                    .andExpect(jsonPath("$.error").doesNotExist());
+        }
+
+        @Test
+        @DisplayName("X-User-Role이 ROLE_CREATOR이면 403 FORBIDDEN을 반환하고 서비스는 호출되지 않는다")
+        void confirm_forbiddenForRoleCreator() throws Exception {
+            mockMvc.perform(post("/enrollments/{enrollmentId}/confirm", ENROLLMENT_ID)
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value(403))
+                    .andExpect(jsonPath("$.error.code").value(140301))
+                    .andExpect(jsonPath("$.error.message").value("FORBIDDEN"));
+
+            verify(enrollmentService, never()).confirm(any(), any());
+        }
+
+        @Test
+        @DisplayName("서비스가 ENROLLMENT_NOT_FOUND를 던지면 404와 해당 에러 코드를 반환한다")
+        void confirm_notFound() throws Exception {
+            given(enrollmentService.confirm(eq(USER_ID), eq(ENROLLMENT_ID)))
+                    .willThrow(new BusinessException(ErrorCode.ENROLLMENT_NOT_FOUND));
+
+            mockMvc.perform(post("/enrollments/{enrollmentId}/confirm", ENROLLMENT_ID)
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value(404))
+                    .andExpect(jsonPath("$.error.code").value(340401))
+                    .andExpect(jsonPath("$.error.message").value("ENROLLMENT_NOT_FOUND"));
+        }
+
+        @Test
+        @DisplayName("서비스가 INVALID_STATUS_FOR_CONFIRM을 던지면 409와 해당 에러 코드를 반환한다")
+        void confirm_invalidStatus() throws Exception {
+            given(enrollmentService.confirm(eq(USER_ID), eq(ENROLLMENT_ID)))
+                    .willThrow(new BusinessException(ErrorCode.INVALID_STATUS_FOR_CONFIRM));
+
+            mockMvc.perform(post("/enrollments/{enrollmentId}/confirm", ENROLLMENT_ID)
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value(409))
+                    .andExpect(jsonPath("$.error.code").value(340904))
+                    .andExpect(jsonPath("$.error.message").value("INVALID_STATUS_FOR_CONFIRM"));
+        }
+
+        @Test
+        @DisplayName("서비스가 PAYMENT_DEADLINE_EXPIRED를 던지면 409와 해당 에러 코드를 반환한다")
+        void confirm_deadlineExpired() throws Exception {
+            given(enrollmentService.confirm(eq(USER_ID), eq(ENROLLMENT_ID)))
+                    .willThrow(new BusinessException(ErrorCode.PAYMENT_DEADLINE_EXPIRED));
+
+            mockMvc.perform(post("/enrollments/{enrollmentId}/confirm", ENROLLMENT_ID)
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value(409))
+                    .andExpect(jsonPath("$.error.code").value(340903))
+                    .andExpect(jsonPath("$.error.message").value("PAYMENT_DEADLINE_EXPIRED"));
+        }
+
+        @Test
+        @DisplayName("인증 헤더가 누락되면 기존 핸들러가 USER_NOT_FOUND로 변환해 응답한다")
+        void confirm_missingAuthHeader() throws Exception {
+            mockMvc.perform(post("/enrollments/{enrollmentId}/confirm", ENROLLMENT_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error.code").value(140003))
+                    .andExpect(jsonPath("$.error.message").value("USER_NOT_FOUND"));
+
+            verify(enrollmentService, never()).confirm(any(), any());
         }
     }
 }
