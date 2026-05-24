@@ -4,6 +4,7 @@ import com.futureschole.course.common.ApiResponse;
 import com.futureschole.course.common.BusinessException;
 import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.CourseCreateRequest;
+import com.futureschole.course.dto.request.CourseStatusChangeRequest;
 import com.futureschole.course.dto.response.CourseDetailResponse;
 import com.futureschole.course.dto.response.PageCourseSummary;
 import com.futureschole.course.entity.type.CourseStatus;
@@ -17,6 +18,7 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -92,6 +94,16 @@ public class CourseController {
         CourseDetailResponse data = courseService.update(userId, courseId, request);
         return ResponseEntity.status(HttpStatus.OK)
                 .body(ApiResponse.success(HttpStatus.OK, data, "강의가 수정되었습니다."));
+    }
+
+    @PatchMapping("/{courseId}/status")
+    public ResponseEntity<ApiResponse<CourseDetailResponse>> changeStatus(
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader("X-User-Role") String role,
+            @PathVariable Long courseId,
+            @Valid @RequestBody CourseStatusChangeRequest request) {
+
+        throw new UnsupportedOperationException("not implemented");
     }
 
     @Operation(
