@@ -104,4 +104,30 @@ public class Course extends BaseTimeEntity {
                                  LocalDateTime startDate, LocalDateTime endDate) {
         return new Course(creator, title, description, price, capacity, startDate, endDate, CourseStatus.DRAFT);
     }
+
+    /**
+     * 임시저장 상태의 강의 정보를 새 값으로 통째로 교체한다.
+     *
+     * <p>제목·설명·가격·정원·수강 기간을 한 번에 전체 교체하는 메서드로, {@link #draftOf} 정적 팩토리와
+     * 대칭을 이룬다. 강의 상태({@code DRAFT})와 작성자, 식별자는 바꾸지 않는다.
+     *
+     * <p>수정 가능 여부(현재 {@code DRAFT}인지, 본인 강의인지) 판단은 서비스가 맡으므로, 이 메서드는
+     * 전달받은 값을 그대로 반영하기만 한다.
+     *
+     * @param title 새 강의 제목
+     * @param description 새 강의 설명
+     * @param price 새 강의 가격
+     * @param capacity 새 정원(최대 수강 인원)
+     * @param startDate 새 수강 기간 시작일
+     * @param endDate 새 수강 기간 종료일
+     */
+    public void modifyDraft(String title, String description, int price, int capacity,
+                            LocalDateTime startDate, LocalDateTime endDate) {
+        this.title = title;
+        this.description = description;
+        this.price = price;
+        this.capacity = capacity;
+        this.startDate = startDate;
+        this.endDate = endDate;
+    }
 }
