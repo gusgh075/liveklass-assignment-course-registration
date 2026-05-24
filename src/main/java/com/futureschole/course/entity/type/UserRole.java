@@ -1,4 +1,4 @@
-package com.futureschole.course.entity;
+package com.futureschole.course.entity.type;
 
 /**
  * 사용자 역할.
