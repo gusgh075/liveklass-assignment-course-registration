@@ -5,6 +5,7 @@ import com.futureschole.course.common.BusinessException;
 import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.EnrollmentCreateRequest;
 import com.futureschole.course.dto.response.EnrollmentCreateResponse;
+import com.futureschole.course.dto.response.EnrollmentResponse;
 import com.futureschole.course.entity.type.EnrollmentResultType;
 import com.futureschole.course.service.EnrollmentService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -13,6 +14,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -47,5 +49,24 @@ public class EnrollmentController {
                 : "정원이 마감되어 대기열에 진입했습니다.";
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(HttpStatus.CREATED, data, message));
+    }
+
+    @Operation(
+            summary = "결제 확정",
+            description = "ROLE_USER가 본인의 PENDING 신청을 CONFIRMED로 전이한다. 결제 기한 30분이 지나지 않은 신청만 확정할 수 있으며, 확정 시각이 기록되어 7일 환불 기준이 된다."
+    )
+    @PostMapping("/{enrollmentId}/confirm")
+    public ResponseEntity<ApiResponse<EnrollmentResponse>> confirm(
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader("X-User-Role") String role,
+            @PathVariable Long enrollmentId) {
+
+        if (!"ROLE_USER".equals(role)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+
+        EnrollmentResponse data = enrollmentService.confirm(userId, enrollmentId);
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(ApiResponse.success(HttpStatus.OK, data, "결제가 확정되었습니다."));
     }
 }
