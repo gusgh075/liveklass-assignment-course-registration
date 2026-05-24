@@ -11,9 +11,9 @@ import org.springframework.http.HttpStatus;
  * 기본 사용자 메시지를 한 값으로 묶어 정의한다. 코드 부여 규칙과 전체 표는
  * {@code docs/error-codes.md}에 단일 진실원천으로 정리되어 있다.
  *
- * <p>본 초기 세팅에서는 도메인에 귀속되지 않는 공통 코드({@code 1xxxxx})만 포함한다.
- * Course({@code 2xxxxx})·Enrollment({@code 3xxxxx}) 도메인 코드는 해당 도메인을
- * 구현하는 이슈에서 표를 보고 항목을 추가한다.
+ * <p>공통 코드({@code 1xxxxx})와 현재까지 구현된 API가 사용하는 Course({@code 2xxxxx}) 코드를
+ * 포함한다. 아직 쓰이지 않는 Course 코드와 Enrollment({@code 3xxxxx}) 도메인 코드는 해당 코드를
+ * 처음 던지는 API를 구현하는 이슈에서 표를 보고 항목을 추가한다.
  */
 @Getter
 @RequiredArgsConstructor
@@ -37,7 +37,18 @@ public enum ErrorCode {
     RESOURCE_NOT_FOUND(140401, HttpStatus.NOT_FOUND, "요청한 리소스를 찾을 수 없습니다."),
 
     /** 미처리 예외에 대한 fallback. */
-    INTERNAL_SERVER_ERROR(150001, HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
+    INTERNAL_SERVER_ERROR(150001, HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),
+
+    // ============ Course (2xxxxx) ============
+
+    /** 지정된 {@code courseId}에 해당하는 강의가 없음. */
+    COURSE_NOT_FOUND(240401, HttpStatus.NOT_FOUND, "강의를 찾을 수 없습니다."),
+
+    /** 본인이 작성한 강의가 아닌 강의에 대한 수정·상태 변경·수강생 목록 조회 시도. */
+    COURSE_NOT_OWNED(240301, HttpStatus.FORBIDDEN, "본인이 작성한 강의가 아닙니다."),
+
+    /** {@code DRAFT} 이외 상태의 강의를 수정 시도. */
+    COURSE_NOT_EDITABLE(240902, HttpStatus.CONFLICT, "DRAFT 상태의 강의만 수정할 수 있습니다.");
 
     /** 6자리 도메인 에러 식별 정수. {@code D HHH SS}(도메인 prefix·HTTP 상태·일련번호) 결합. */
     private final int code;
