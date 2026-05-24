@@ -6,14 +6,18 @@ import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.EnrollmentCreateRequest;
 import com.futureschole.course.dto.response.EnrollmentCreateResponse;
 import com.futureschole.course.dto.response.EnrollmentResponse;
+import com.futureschole.course.dto.response.PageMyEnrollmentItem;
 import com.futureschole.course.entity.type.EnrollmentResultType;
 import com.futureschole.course.service.EnrollmentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -87,5 +91,24 @@ public class EnrollmentController {
         EnrollmentResponse data = enrollmentService.cancel(userId, enrollmentId);
         return ResponseEntity.status(HttpStatus.OK)
                 .body(ApiResponse.success(HttpStatus.OK, data, "수강 신청이 취소되었습니다."));
+    }
+
+    @Operation(
+            summary = "내 수강 신청 목록 조회",
+            description = "ROLE_USER가 본인의 수강 신청 이력을 페이지네이션으로 조회한다. PENDING/CONFIRMED/CANCELLED 모든 상태가 포함되며, 각 항목에 강의 제목·가격·정원이 함께 담긴다."
+    )
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<PageMyEnrollmentItem>> getMyEnrollments(
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader("X-User-Role") String role,
+            @PageableDefault(size = 20) Pageable pageable) {
+
+        if (!"ROLE_USER".equals(role)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+
+        PageMyEnrollmentItem data = enrollmentService.getMyEnrollments(userId, pageable);
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(ApiResponse.success(HttpStatus.OK, data, "내 수강 신청 목록 조회에 성공했습니다."));
     }
 }
