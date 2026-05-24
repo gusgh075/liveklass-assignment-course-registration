@@ -16,6 +16,7 @@ import com.futureschole.course.repository.EnrollmentRepository;
 import com.futureschole.course.repository.UserRepository;
 import com.futureschole.course.repository.WaitlistRepository;
 import com.futureschole.course.dto.response.EnrollmentResponse;
+import com.futureschole.course.dto.response.PageMyEnrollmentItem;
 import com.futureschole.course.entity.type.EnrollmentStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -24,6 +25,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Clock;
@@ -31,6 +36,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -388,6 +394,56 @@ class EnrollmentServiceTest {
             ReflectionTestUtils.setField(enrollment, "updatedAt", confirmedAt);
             enrollment.confirm(confirmedAt);
             return enrollment;
+        }
+    }
+
+    @Nested
+    @DisplayName("getMyEnrollments: 내 신청 목록 조회")
+    class GetMyEnrollments {
+
+        @Test
+        @DisplayName("본인 신청을 페이지로 조회해 항목을 강의 정보와 함께 매핑한 페이지 응답을 반환한다")
+        void getMyEnrollments_success() {
+            // given
+            ReflectionTestUtils.setField(course, "title", "제목");
+            Enrollment enrollment = Enrollment.pending(user, course);
+            ReflectionTestUtils.setField(enrollment, "id", ENROLLMENT_ID);
+            ReflectionTestUtils.setField(enrollment, "createdAt", CREATED_AT);
+            ReflectionTestUtils.setField(enrollment, "updatedAt", CREATED_AT);
+
+            Pageable pageable = PageRequest.of(0, 20);
+            Page<Enrollment> page = new PageImpl<>(List.of(enrollment), pageable, 1);
+            given(userRepository.findByUserId(USER_ID)).willReturn(Optional.of(user));
+            given(enrollmentRepository.findByUser(user, pageable)).willReturn(page);
+
+            // when
+            PageMyEnrollmentItem response = enrollmentService.getMyEnrollments(USER_ID, pageable);
+
+            // then
+            assertThat(response.page()).isEqualTo(0);
+            assertThat(response.size()).isEqualTo(20);
+            assertThat(response.totalElements()).isEqualTo(1);
+            assertThat(response.totalPages()).isEqualTo(1);
+            assertThat(response.content()).hasSize(1);
+            assertThat(response.content().get(0).enrollmentId()).isEqualTo(ENROLLMENT_ID);
+            assertThat(response.content().get(0).courseId()).isEqualTo(COURSE_ID);
+            assertThat(response.content().get(0).courseTitle()).isEqualTo("제목");
+            assertThat(response.content().get(0).price()).isEqualTo(10000);
+            assertThat(response.content().get(0).capacity()).isEqualTo(CAPACITY);
+            assertThat(response.content().get(0).status()).isEqualTo(EnrollmentStatus.PENDING);
+        }
+
+        @Test
+        @DisplayName("사용자가 존재하지 않으면 USER_NOT_FOUND를 던지고 신청을 조회하지 않는다")
+        void getMyEnrollments_userNotFound() {
+            Pageable pageable = PageRequest.of(0, 20);
+            given(userRepository.findByUserId(USER_ID)).willReturn(Optional.empty());
+
+            assertThatThrownBy(() -> enrollmentService.getMyEnrollments(USER_ID, pageable))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.USER_NOT_FOUND);
+
+            verify(enrollmentRepository, never()).findByUser(any(), any());
         }
     }
 }
