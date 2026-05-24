@@ -6,9 +6,12 @@ import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.CourseCreateRequest;
 import com.futureschole.course.dto.request.CourseStatusChangeRequest;
 import com.futureschole.course.dto.response.CourseDetailResponse;
+import com.futureschole.course.dto.response.CourseEnrollmentItemResponse;
 import com.futureschole.course.dto.response.CourseSummaryResponse;
+import com.futureschole.course.dto.response.PageCourseEnrollmentItem;
 import com.futureschole.course.dto.response.PageCourseSummary;
 import com.futureschole.course.entity.type.CourseStatus;
+import com.futureschole.course.entity.type.EnrollmentStatus;
 import com.futureschole.course.service.CourseService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -584,6 +587,107 @@ class CourseControllerTest {
                     .andExpect(jsonPath("$.code").value(409))
                     .andExpect(jsonPath("$.error.code").value(240903))
                     .andExpect(jsonPath("$.error.message").value("COURSE_ENDED"));
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /courses/{courseId}/enrollments")
+    class GetCourseEnrollments {
+
+        private static final Long COURSE_ID = 100L;
+
+        private PageCourseEnrollmentItem samplePage() {
+            LocalDateTime createdAt = LocalDateTime.of(2026, 5, 22, 14, 15);
+            LocalDateTime confirmedAt = LocalDateTime.of(2026, 5, 22, 14, 30);
+            CourseEnrollmentItemResponse item = new CourseEnrollmentItemResponse(
+                    101L, "user-001", EnrollmentStatus.CONFIRMED, confirmedAt, createdAt);
+            return new PageCourseEnrollmentItem(List.of(item), 0, 20, 1, 1);
+        }
+
+        @Test
+        @DisplayName("ROLE_CREATOR가 본인 강의를 조회하면 200과 수강생 목록 페이지를 반환한다")
+        void getCourseEnrollments_success() throws Exception {
+            given(courseService.getCourseEnrollments(eq(COURSE_ID), eq(CREATOR_USER_ID), any(Pageable.class)))
+                    .willReturn(samplePage());
+
+            mockMvc.perform(get("/courses/{courseId}/enrollments", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.content[0].enrollmentId").value(101))
+                    .andExpect(jsonPath("$.data.content[0].userId").value("user-001"))
+                    .andExpect(jsonPath("$.data.content[0].status").value("CONFIRMED"))
+                    .andExpect(jsonPath("$.data.page").value(0))
+                    .andExpect(jsonPath("$.data.size").value(20))
+                    .andExpect(jsonPath("$.data.totalElements").value(1))
+                    .andExpect(jsonPath("$.error").doesNotExist());
+        }
+
+        @Test
+        @DisplayName("page·size 파라미터를 Pageable로 전달한다")
+        void getCourseEnrollments_paging() throws Exception {
+            given(courseService.getCourseEnrollments(eq(COURSE_ID), eq(CREATOR_USER_ID), any(Pageable.class)))
+                    .willReturn(new PageCourseEnrollmentItem(List.of(), 1, 5, 0, 0));
+
+            mockMvc.perform(get("/courses/{courseId}/enrollments", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR")
+                            .param("page", "1")
+                            .param("size", "5"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content").isArray());
+
+            ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+            verify(courseService).getCourseEnrollments(eq(COURSE_ID), eq(CREATOR_USER_ID), pageableCaptor.capture());
+            assertThat(pageableCaptor.getValue().getPageNumber()).isEqualTo(1);
+            assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(5);
+        }
+
+        @Test
+        @DisplayName("X-User-Role이 ROLE_USER이면 403 FORBIDDEN을 반환하고 서비스는 호출되지 않는다")
+        void getCourseEnrollments_forbiddenForRoleUser() throws Exception {
+            mockMvc.perform(get("/courses/{courseId}/enrollments", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value(403))
+                    .andExpect(jsonPath("$.error.code").value(140301))
+                    .andExpect(jsonPath("$.error.message").value("FORBIDDEN"));
+
+            verify(courseService, never()).getCourseEnrollments(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("서비스가 COURSE_NOT_FOUND를 던지면 404와 해당 에러 코드를 반환한다")
+        void getCourseEnrollments_courseNotFound() throws Exception {
+            given(courseService.getCourseEnrollments(eq(COURSE_ID), eq(CREATOR_USER_ID), any(Pageable.class)))
+                    .willThrow(new BusinessException(ErrorCode.COURSE_NOT_FOUND));
+
+            mockMvc.perform(get("/courses/{courseId}/enrollments", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value(404))
+                    .andExpect(jsonPath("$.error.code").value(240401))
+                    .andExpect(jsonPath("$.error.message").value("COURSE_NOT_FOUND"));
+        }
+
+        @Test
+        @DisplayName("서비스가 COURSE_NOT_OWNED를 던지면 403과 해당 에러 코드를 반환한다")
+        void getCourseEnrollments_courseNotOwned() throws Exception {
+            given(courseService.getCourseEnrollments(eq(COURSE_ID), eq(CREATOR_USER_ID), any(Pageable.class)))
+                    .willThrow(new BusinessException(ErrorCode.COURSE_NOT_OWNED));
+
+            mockMvc.perform(get("/courses/{courseId}/enrollments", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value(403))
+                    .andExpect(jsonPath("$.error.code").value(240301))
+                    .andExpect(jsonPath("$.error.message").value("COURSE_NOT_OWNED"));
         }
     }
 }
