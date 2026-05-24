@@ -38,7 +38,7 @@ import java.util.stream.Collectors;
  * 헤더 기반으로 끝나므로 본 서비스는 도메인 로직과 영속화에만 집중한다.
  */
 @Service
-@Transactional
+@Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class CourseService {
 
@@ -64,6 +64,7 @@ public class CourseService {
      * @throws BusinessException 외부 식별자에 해당하는 사용자가 없는 경우
      *                           ({@link ErrorCode#USER_NOT_FOUND})
      */
+    @Transactional
     public CourseDetailResponse create(String userId, CourseCreateRequest request) {
         User creator = userRepository.findByUserId(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
@@ -99,6 +100,7 @@ public class CourseService {
      *                           요청자가 작성자가 아니면 {@link ErrorCode#COURSE_NOT_OWNED},
      *                           {@code DRAFT}가 아닌 강의면 {@link ErrorCode#COURSE_NOT_EDITABLE}
      */
+    @Transactional
     public CourseDetailResponse update(String userId, Long courseId, CourseCreateRequest request) {
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
@@ -142,6 +144,7 @@ public class CourseService {
      *                           허용되지 않은 전이면 {@link ErrorCode#COURSE_ILLEGAL_TRANSITION},
      *                           오픈 시점에 종료일이 이미 지났으면 {@link ErrorCode#COURSE_ENDED}
      */
+    @Transactional
     public CourseDetailResponse changeStatus(String userId, Long courseId, CourseStatus target) {
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
@@ -178,7 +181,6 @@ public class CourseService {
      * @return 인원 카운트가 채워진 강의 상세 응답
      * @throws BusinessException 강의가 없으면 {@link ErrorCode#COURSE_NOT_FOUND}
      */
-    @Transactional(readOnly = true)
     public CourseDetailResponse getDetail(Long courseId) {
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
@@ -201,7 +203,6 @@ public class CourseService {
      * @param pageable 페이지·정렬 정보
      * @return 강의 목록 페이지 응답
      */
-    @Transactional(readOnly = true)
     public PageCourseSummary getList(List<CourseStatus> statuses, Pageable pageable) {
         Page<Course> page = courseRepository.findByStatusIn(statuses, pageable);
 
@@ -237,7 +238,6 @@ public class CourseService {
      * @throws BusinessException 강의가 없으면 {@link ErrorCode#COURSE_NOT_FOUND},
      *                           요청자가 작성자가 아니면 {@link ErrorCode#COURSE_NOT_OWNED}
      */
-    @Transactional(readOnly = true)
     public PageCourseEnrollmentItem getCourseEnrollments(
             Long courseId, String requesterUserId, Pageable pageable) {
         Course course = courseRepository.findById(courseId)
@@ -259,6 +259,7 @@ public class CourseService {
      *
      * @return 마감 처리된 강의 수
      */
+    @Transactional
     public int closeEndedCourses() {
         List<Course> ended = courseRepository.findByStatusAndEndDateBefore(
                 CourseStatus.OPEN, LocalDateTime.now(clock));

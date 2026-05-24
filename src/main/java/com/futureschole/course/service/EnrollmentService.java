@@ -35,7 +35,7 @@ import java.util.List;
  * 권한(역할) 검증은 컨트롤러에서 헤더 기반으로 끝나므로 본 서비스는 도메인 로직과 영속화에 집중한다.
  */
 @Service
-@Transactional
+@Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class EnrollmentService {
 
@@ -71,6 +71,7 @@ public class EnrollmentService {
      *                           강의가 {@code OPEN}이 아니면 {@link ErrorCode#COURSE_NOT_OPEN_FOR_ENROLLMENT},
      *                           활성 신청·대기열이 이미 있으면 {@link ErrorCode#DUPLICATE_ACTIVE_ENROLLMENT}
      */
+    @Transactional
     public EnrollmentCreateResponse apply(String userId, EnrollmentCreateRequest request) {
         User user = userRepository.findByUserId(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
@@ -107,6 +108,7 @@ public class EnrollmentService {
      *                           상태가 {@code PENDING}이 아니면 {@link ErrorCode#INVALID_STATUS_FOR_CONFIRM},
      *                           결제 기한이 지났으면 {@link ErrorCode#PAYMENT_DEADLINE_EXPIRED}
      */
+    @Transactional
     public EnrollmentResponse confirm(String userId, Long enrollmentId) {
         Enrollment enrollment = enrollmentRepository.findById(enrollmentId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ENROLLMENT_NOT_FOUND));
@@ -143,6 +145,7 @@ public class EnrollmentService {
      *                           상태가 {@code CONFIRMED}가 아니면 {@link ErrorCode#INVALID_STATUS_FOR_CANCEL},
      *                           결제 확정 후 7일이 지났으면 {@link ErrorCode#REFUND_WINDOW_EXPIRED}
      */
+    @Transactional
     public EnrollmentResponse cancel(String userId, Long enrollmentId) {
         Enrollment enrollment = enrollmentRepository.findById(enrollmentId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ENROLLMENT_NOT_FOUND));
@@ -176,7 +179,6 @@ public class EnrollmentService {
      * @return 내 신청 목록 페이지 응답
      * @throws BusinessException 사용자가 없으면 {@link ErrorCode#USER_NOT_FOUND}
      */
-    @Transactional(readOnly = true)
     public PageMyEnrollmentItem getMyEnrollments(String userId, Pageable pageable) {
         User user = userRepository.findByUserId(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
@@ -192,6 +194,7 @@ public class EnrollmentService {
      *
      * @return 만료 처리된 신청 수
      */
+    @Transactional
     public int expirePendingPayments() {
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDateTime threshold = now.minusMinutes(PAYMENT_DEADLINE_MINUTES);
@@ -206,7 +209,6 @@ public class EnrollmentService {
      *
      * @return 대기 인원이 있는 강의 식별자 목록
      */
-    @Transactional(readOnly = true)
     public List<Long> findWaitlistedCourseIds() {
         return waitlistRepository.findDistinctCourseIds();
     }
@@ -221,6 +223,7 @@ public class EnrollmentService {
      *
      * @param courseId 승급을 시도할 강의 식별자
      */
+    @Transactional
     public void promoteCourse(Long courseId) {
         Course course = courseRepository.findByIdForUpdate(courseId).orElse(null);
         if (course == null || course.getStatus() != CourseStatus.OPEN) {
