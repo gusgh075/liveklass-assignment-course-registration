@@ -5,6 +5,8 @@ import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.EnrollmentCreateRequest;
 import com.futureschole.course.dto.response.EnrollmentCreateResponse;
 import com.futureschole.course.dto.response.EnrollmentResponse;
+import com.futureschole.course.dto.response.MyEnrollmentItemResponse;
+import com.futureschole.course.dto.response.PageMyEnrollmentItem;
 import com.futureschole.course.entity.Course;
 import com.futureschole.course.entity.Enrollment;
 import com.futureschole.course.entity.User;
@@ -16,6 +18,8 @@ import com.futureschole.course.repository.EnrollmentRepository;
 import com.futureschole.course.repository.UserRepository;
 import com.futureschole.course.repository.WaitlistRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -157,6 +161,26 @@ public class EnrollmentService {
 
         enrollment.cancel(now);
         return EnrollmentResponse.from(enrollment);
+    }
+
+    /**
+     * 본인의 수강 신청 이력을 페이지로 조회한다.
+     *
+     * <p>{@code PENDING}/{@code CONFIRMED}/{@code CANCELLED}를 가리지 않고 본인 신청 전체를 반환한다.
+     * 각 항목은 신청 상태와 함께 대상 강의의 제목·가격·정원을 담으며, 연관 강의는 Repository에서
+     * 함께 로드한다.
+     *
+     * @param userId   요청 사용자의 외부 식별자({@code X-User-Id} 헤더 값)
+     * @param pageable 페이지 요청(번호·크기·정렬)
+     * @return 내 신청 목록 페이지 응답
+     * @throws BusinessException 사용자가 없으면 {@link ErrorCode#USER_NOT_FOUND}
+     */
+    @Transactional(readOnly = true)
+    public PageMyEnrollmentItem getMyEnrollments(String userId, Pageable pageable) {
+        User user = userRepository.findByUserId(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        Page<Enrollment> page = enrollmentRepository.findByUser(user, pageable);
+        return PageMyEnrollmentItem.from(page, MyEnrollmentItemResponse::from);
     }
 
     /** 정원 내 신청: {@code PENDING} 레코드를 만들고 생성 시각 + 30분을 결제 기한으로 반환한다. */
