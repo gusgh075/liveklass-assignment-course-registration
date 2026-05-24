@@ -5,8 +5,11 @@ import com.futureschole.course.entity.Enrollment;
 import com.futureschole.course.entity.User;
 import com.futureschole.course.entity.type.EnrollmentStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
+import java.util.List;
 
 public interface EnrollmentRepository extends JpaRepository<Enrollment, Long> {
 
@@ -15,4 +18,21 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, Long> {
 
     /** 강의의 주어진 상태 신청 수를 센다(정원 산정은 {@code PENDING}+{@code CONFIRMED}). */
     int countByCourseAndStatusIn(Course course, Collection<EnrollmentStatus> statuses);
+
+    /**
+     * 여러 강의의 활성 신청 수를 강의별로 묶어 한 번에 집계한다.
+     *
+     * <p>강의 목록 조회에서 페이지에 담긴 강의들의 신청 인원을 N+1 없이 구하기 위한 배치 카운트다.
+     * 정원 산정과 동일하게 {@code PENDING}+{@code CONFIRMED}만 세며, 신청이 하나도 없는 강의는
+     * 결과 행에 포함되지 않으므로 호출 측에서 0으로 보정한다. {@code (course_id, status)} 인덱스를
+     * 전제로 한다.
+     *
+     * @param courseIds 집계 대상 강의 식별자 목록(비어 있지 않아야 한다)
+     * @param statuses  집계에 포함할 신청 상태
+     * @return 강의별 {@code (강의 ID, 신청 수)} 프로젝션 목록
+     */
+    @Query("select e.course.id as courseId, count(e) as count from Enrollment e "
+            + "where e.course.id in :courseIds and e.status in :statuses group by e.course.id")
+    List<CourseCountProjection> countActiveByCourseIds(@Param("courseIds") Collection<Long> courseIds,
+                                                       @Param("statuses") Collection<EnrollmentStatus> statuses);
 }

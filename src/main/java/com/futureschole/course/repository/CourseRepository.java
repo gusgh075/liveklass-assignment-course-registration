@@ -1,12 +1,16 @@
 package com.futureschole.course.repository;
 
 import com.futureschole.course.entity.Course;
+import com.futureschole.course.entity.type.CourseStatus;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.Optional;
 
 public interface CourseRepository extends JpaRepository<Course, Long> {
@@ -24,4 +28,16 @@ public interface CourseRepository extends JpaRepository<Course, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select c from Course c where c.id = :id")
     Optional<Course> findByIdForUpdate(@Param("id") Long id);
+
+    /**
+     * 주어진 상태에 속하는 강의를 페이지 단위로 조회한다.
+     *
+     * <p>강의 목록 조회의 상태 필터에 사용한다. {@code (status, end_date)} 복합 인덱스를 전제로 한
+     * 파생 쿼리이며, 정렬·페이지네이션은 {@link Pageable}이 담당한다.
+     *
+     * @param statuses 조회 대상 상태 집합(목록 조회 기본은 {@code OPEN}+{@code CLOSED})
+     * @param pageable 페이지·정렬 정보
+     * @return 조건을 만족하는 강의 페이지
+     */
+    Page<Course> findByStatusIn(Collection<CourseStatus> statuses, Pageable pageable);
 }
