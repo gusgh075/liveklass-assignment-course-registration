@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.futureschole.course.common.BusinessException;
 import com.futureschole.course.common.ErrorCode;
 import com.futureschole.course.dto.request.CourseCreateRequest;
+import com.futureschole.course.dto.request.CourseStatusChangeRequest;
 import com.futureschole.course.dto.response.CourseDetailResponse;
 import com.futureschole.course.dto.response.CourseSummaryResponse;
 import com.futureschole.course.dto.response.PageCourseSummary;
@@ -34,6 +35,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -442,6 +444,146 @@ class CourseControllerTest {
             verify(courseService).getList(anyList(), pageableCaptor.capture());
             assertThat(pageableCaptor.getValue().getPageNumber()).isEqualTo(2);
             assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(5);
+        }
+    }
+
+    @Nested
+    @DisplayName("PATCH /courses/{courseId}/status")
+    class ChangeStatus {
+
+        private static final Long COURSE_ID = 100L;
+
+        private CourseDetailResponse openedResponse() {
+            LocalDateTime now = LocalDateTime.of(2026, 5, 24, 14, 30);
+            return new CourseDetailResponse(
+                    COURSE_ID,
+                    CREATOR_USER_ID,
+                    defaultRequest.title(),
+                    defaultRequest.description(),
+                    defaultRequest.price(),
+                    defaultRequest.capacity(),
+                    0,
+                    0,
+                    DEFAULT_START,
+                    DEFAULT_END,
+                    CourseStatus.OPEN,
+                    now,
+                    now
+            );
+        }
+
+        @Test
+        @DisplayName("ROLE_CREATOR가 DRAFT 강의를 OPEN으로 전이하면 200과 변경된 강의 상세를 반환한다")
+        void changeStatus_draftToOpen() throws Exception {
+            // given
+            given(courseService.changeStatus(CREATOR_USER_ID, COURSE_ID, CourseStatus.OPEN))
+                    .willReturn(openedResponse());
+            CourseStatusChangeRequest body = new CourseStatusChangeRequest(CourseStatus.OPEN);
+
+            // when & then
+            mockMvc.perform(patch("/courses/{courseId}/status", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(body)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.id").value(100))
+                    .andExpect(jsonPath("$.data.status").value("OPEN"))
+                    .andExpect(jsonPath("$.error").doesNotExist());
+        }
+
+        @Test
+        @DisplayName("X-User-Role이 ROLE_USER이면 403 FORBIDDEN을 반환하고 서비스는 호출되지 않는다")
+        void changeStatus_forbiddenForRoleUser() throws Exception {
+            CourseStatusChangeRequest body = new CourseStatusChangeRequest(CourseStatus.OPEN);
+
+            mockMvc.perform(patch("/courses/{courseId}/status", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_USER")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(body)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value(403))
+                    .andExpect(jsonPath("$.error.code").value(140301))
+                    .andExpect(jsonPath("$.error.message").value("FORBIDDEN"));
+
+            verify(courseService, never()).changeStatus(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("status가 누락되면 400 VALIDATION_FAILED를 반환한다")
+        void changeStatus_validationFailed() throws Exception {
+            Map<String, Object> invalidBody = new HashMap<>();
+            invalidBody.put("status", null);                 // @NotNull 위반
+
+            mockMvc.perform(patch("/courses/{courseId}/status", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(invalidBody)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value(400))
+                    .andExpect(jsonPath("$.error.code").value(140001))
+                    .andExpect(jsonPath("$.error.message").value("VALIDATION_FAILED"))
+                    .andExpect(jsonPath("$.error.details").isArray());
+
+            verify(courseService, never()).changeStatus(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("서비스가 COURSE_NOT_FOUND를 던지면 404와 해당 에러 코드를 반환한다")
+        void changeStatus_courseNotFound() throws Exception {
+            given(courseService.changeStatus(CREATOR_USER_ID, COURSE_ID, CourseStatus.OPEN))
+                    .willThrow(new BusinessException(ErrorCode.COURSE_NOT_FOUND));
+            CourseStatusChangeRequest body = new CourseStatusChangeRequest(CourseStatus.OPEN);
+
+            mockMvc.perform(patch("/courses/{courseId}/status", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(body)))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value(404))
+                    .andExpect(jsonPath("$.error.code").value(240401))
+                    .andExpect(jsonPath("$.error.message").value("COURSE_NOT_FOUND"));
+        }
+
+        @Test
+        @DisplayName("서비스가 COURSE_ILLEGAL_TRANSITION을 던지면 409와 해당 에러 코드를 반환한다")
+        void changeStatus_illegalTransition() throws Exception {
+            given(courseService.changeStatus(CREATOR_USER_ID, COURSE_ID, CourseStatus.OPEN))
+                    .willThrow(new BusinessException(ErrorCode.COURSE_ILLEGAL_TRANSITION));
+            CourseStatusChangeRequest body = new CourseStatusChangeRequest(CourseStatus.OPEN);
+
+            mockMvc.perform(patch("/courses/{courseId}/status", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(body)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value(409))
+                    .andExpect(jsonPath("$.error.code").value(240901))
+                    .andExpect(jsonPath("$.error.message").value("COURSE_ILLEGAL_TRANSITION"));
+        }
+
+        @Test
+        @DisplayName("서비스가 COURSE_ENDED를 던지면 409와 해당 에러 코드를 반환한다")
+        void changeStatus_courseEnded() throws Exception {
+            given(courseService.changeStatus(CREATOR_USER_ID, COURSE_ID, CourseStatus.OPEN))
+                    .willThrow(new BusinessException(ErrorCode.COURSE_ENDED));
+            CourseStatusChangeRequest body = new CourseStatusChangeRequest(CourseStatus.OPEN);
+
+            mockMvc.perform(patch("/courses/{courseId}/status", COURSE_ID)
+                            .header("X-User-Id", CREATOR_USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(body)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value(409))
+                    .andExpect(jsonPath("$.error.code").value(240903))
+                    .andExpect(jsonPath("$.error.message").value("COURSE_ENDED"));
         }
     }
 }
