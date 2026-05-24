@@ -26,6 +26,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -312,6 +313,61 @@ class CourseControllerTest {
                     .andExpect(jsonPath("$.error.message").value("USER_NOT_FOUND"));
 
             verify(courseService, never()).update(any(), any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /courses/{courseId}")
+    class GetDetail {
+
+        private static final Long COURSE_ID = 100L;
+
+        @Test
+        @DisplayName("강의가 존재하면 인증 헤더 없이도 200과 신청·대기 인원이 담긴 강의 상세를 반환한다")
+        void getDetail_success() throws Exception {
+            // given
+            LocalDateTime now = LocalDateTime.of(2026, 5, 24, 14, 30);
+            CourseDetailResponse responseBody = new CourseDetailResponse(
+                    COURSE_ID,
+                    CREATOR_USER_ID,
+                    defaultRequest.title(),
+                    defaultRequest.description(),
+                    defaultRequest.price(),
+                    defaultRequest.capacity(),
+                    7,
+                    3,
+                    DEFAULT_START,
+                    DEFAULT_END,
+                    CourseStatus.OPEN,
+                    now,
+                    now
+            );
+            given(courseService.getDetail(COURSE_ID)).willReturn(responseBody);
+
+            // when & then
+            mockMvc.perform(get("/courses/{courseId}", COURSE_ID))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.id").value(100))
+                    .andExpect(jsonPath("$.data.creatorId").value(CREATOR_USER_ID))
+                    .andExpect(jsonPath("$.data.status").value("OPEN"))
+                    .andExpect(jsonPath("$.data.enrolledCount").value(7))
+                    .andExpect(jsonPath("$.data.waitingCount").value(3))
+                    .andExpect(jsonPath("$.error").doesNotExist());
+        }
+
+        @Test
+        @DisplayName("서비스가 COURSE_NOT_FOUND를 던지면 404와 해당 에러 코드를 반환한다")
+        void getDetail_courseNotFound() throws Exception {
+            given(courseService.getDetail(COURSE_ID))
+                    .willThrow(new BusinessException(ErrorCode.COURSE_NOT_FOUND));
+
+            mockMvc.perform(get("/courses/{courseId}", COURSE_ID))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value(404))
+                    .andExpect(jsonPath("$.error.code").value(240401))
+                    .andExpect(jsonPath("$.error.message").value("COURSE_NOT_FOUND"));
         }
     }
 }
