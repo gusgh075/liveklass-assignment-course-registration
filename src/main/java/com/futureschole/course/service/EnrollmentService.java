@@ -41,6 +41,9 @@ public class EnrollmentService {
     /** 결제 기한(분). {@code PENDING} 생성 시각으로부터 이 시간 안에 결제해야 한다. */
     private static final int PAYMENT_DEADLINE_MINUTES = 30;
 
+    /** 환불 가능 기간(일). 결제 확정 시각으로부터 이 기간 안에만 수강 취소를 허용한다. */
+    private static final int REFUND_WINDOW_DAYS = 7;
+
     private final UserRepository userRepository;
     private final CourseRepository courseRepository;
     private final EnrollmentRepository enrollmentRepository;
@@ -117,6 +120,42 @@ public class EnrollmentService {
         }
 
         enrollment.confirm(now);
+        return EnrollmentResponse.from(enrollment);
+    }
+
+    /**
+     * 본인의 결제 확정 신청을 수강 취소로 전이한다.
+     *
+     * <p>신청을 조회해 본인 소유인지 확인하고, 상태가 {@code CONFIRMED}이며 결제 확정 시각으로부터
+     * 7일이 지나지 않았을 때만 {@code CANCELLED}로 전이한다. 취소 시각이 기록되고 정원 산정에서
+     * 제외된다. 영속 상태의 엔티티를 변경하므로 더티 체킹으로 반영되고 별도 저장 호출은 하지 않는다.
+     *
+     * @param userId       요청 사용자의 외부 식별자({@code X-User-Id} 헤더 값)
+     * @param enrollmentId 수강 취소 대상 신청 식별자
+     * @return 취소 후 신청 상태를 담은 응답
+     * @throws BusinessException 신청이 없으면 {@link ErrorCode#ENROLLMENT_NOT_FOUND},
+     *                           본인 신청이 아니면 {@link ErrorCode#ENROLLMENT_NOT_OWNED},
+     *                           상태가 {@code CONFIRMED}가 아니면 {@link ErrorCode#INVALID_STATUS_FOR_CANCEL},
+     *                           결제 확정 후 7일이 지났으면 {@link ErrorCode#REFUND_WINDOW_EXPIRED}
+     */
+    public EnrollmentResponse cancel(String userId, Long enrollmentId) {
+        Enrollment enrollment = enrollmentRepository.findById(enrollmentId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ENROLLMENT_NOT_FOUND));
+
+        if (!enrollment.getUser().getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.ENROLLMENT_NOT_OWNED);
+        }
+        if (enrollment.getStatus() != EnrollmentStatus.CONFIRMED) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS_FOR_CANCEL);
+        }
+
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime refundDeadline = enrollment.getConfirmedAt().plusDays(REFUND_WINDOW_DAYS);
+        if (refundDeadline.isBefore(now)) {
+            throw new BusinessException(ErrorCode.REFUND_WINDOW_EXPIRED);
+        }
+
+        enrollment.cancel(now);
         return EnrollmentResponse.from(enrollment);
     }
 
