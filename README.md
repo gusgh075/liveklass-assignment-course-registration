@@ -265,7 +265,34 @@ java -jar build\libs\course-0.0.1-SNAPSHOT.jar
 <details>
 <summary><h2>API 목록 및 예시</h2></summary>
 
-부팅 후 Swagger UI(`http://localhost:8080/swagger-ui.html`)와 명세 산출물 `docs/openapi.yml`에서 전체 API의 경로·요청·응답·예시를 확인할 수 있습니다.
+인증이 필요한 요청은 HTTP 헤더 `X-User-Id`·`X-User-Role`로 사용자 컨텍스트를 전달합니다. 강의 목록·상세 조회는 공개라 헤더가 필요 없습니다.
+
+### Course
+
+| 메서드 | 경로 | 역할 | 설명 |
+|--------|------|------|------|
+| `POST` | `/courses` | `ROLE_CREATOR` | 강의 등록(임시저장, `DRAFT` 생성) |
+| `GET` | `/courses` | 공개 | 강의 목록 조회(상태 필터·페이지네이션, `DRAFT` 제외) |
+| `GET` | `/courses/{courseId}` | 공개 | 강의 상세 조회(신청 인원·대기 인원 포함) |
+| `PUT` | `/courses/{courseId}` | `ROLE_CREATOR` | 강의 정보 수정(`DRAFT`만 전체 교체) |
+| `PATCH` | `/courses/{courseId}/status` | `ROLE_CREATOR` | 강의 상태 변경(오픈 `DRAFT→OPEN` / 마감 `OPEN→CLOSED`) |
+| `GET` | `/courses/{courseId}/enrollments` | `ROLE_CREATOR` | 강의별 수강생 목록(소유자, 활성 신청 페이지네이션) |
+
+### Enrollment
+
+| 메서드 | 경로 | 역할 | 설명 |
+|--------|------|------|------|
+| `POST` | `/enrollments` | `ROLE_USER` | 수강 신청(정원 마감 시 대기열 자동 진입) |
+| `POST` | `/enrollments/{enrollmentId}/confirm` | `ROLE_USER` | 결제 확정(`PENDING → CONFIRMED`) |
+| `POST` | `/enrollments/{enrollmentId}/cancel` | `ROLE_USER` | 수강 취소(`CONFIRMED → CANCELLED`, 결제 후 7일 이내) |
+| `GET` | `/enrollments/me` | `ROLE_USER` | 내 수강 신청 목록(모든 상태, 페이지네이션) |
+
+전체 요청·응답 스키마와 상태 코드, 상세 예시는 부팅 후 Swagger UI(`http://localhost:8080/swagger-ui.html`)와 명세 산출물 `docs/openapi.yml`에서 확인할 수 있습니다.
+
+### 예시
+
+![강의상세조회예시.png](docs/%EA%B0%95%EC%9D%98%EC%83%81%EC%84%B8%EC%A1%B0%ED%9A%8C%EC%98%88%EC%8B%9C.png)<!-- 실행 화면/응답 예시 스크린샷을 여기에 첨부 -->
+
 </details>
 
 <details>
