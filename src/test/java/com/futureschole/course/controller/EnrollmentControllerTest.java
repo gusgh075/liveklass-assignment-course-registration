@@ -278,4 +278,107 @@ class EnrollmentControllerTest {
             verify(enrollmentService, never()).confirm(any(), any());
         }
     }
+
+    @Nested
+    @DisplayName("POST /enrollments/{enrollmentId}/cancel")
+    class Cancel {
+
+        private EnrollmentResponse cancelledResponse() {
+            LocalDateTime createdAt = LocalDateTime.of(2026, 5, 24, 14, 15);
+            LocalDateTime confirmedAt = LocalDateTime.of(2026, 5, 24, 14, 30);
+            LocalDateTime cancelledAt = LocalDateTime.of(2026, 5, 24, 14, 45);
+            return new EnrollmentResponse(
+                    ENROLLMENT_ID, USER_ID, COURSE_ID, EnrollmentStatus.CANCELLED,
+                    confirmedAt, cancelledAt, createdAt, cancelledAt);
+        }
+
+        @Test
+        @DisplayName("ROLE_USER가 수강 취소에 성공하면 200과 CANCELLED 신청 정보를 반환한다")
+        void cancel_returns200() throws Exception {
+            given(enrollmentService.cancel(eq(USER_ID), eq(ENROLLMENT_ID))).willReturn(cancelledResponse());
+
+            mockMvc.perform(post("/enrollments/{enrollmentId}/cancel", ENROLLMENT_ID)
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.enrollmentId").value(101))
+                    .andExpect(jsonPath("$.data.userId").value(USER_ID))
+                    .andExpect(jsonPath("$.data.status").value("CANCELLED"))
+                    .andExpect(jsonPath("$.data.cancelledAt").exists())
+                    .andExpect(jsonPath("$.error").doesNotExist());
+        }
+
+        @Test
+        @DisplayName("X-User-Role이 ROLE_CREATOR이면 403 FORBIDDEN을 반환하고 서비스는 호출되지 않는다")
+        void cancel_forbiddenForRoleCreator() throws Exception {
+            mockMvc.perform(post("/enrollments/{enrollmentId}/cancel", ENROLLMENT_ID)
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_CREATOR"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value(403))
+                    .andExpect(jsonPath("$.error.code").value(140301))
+                    .andExpect(jsonPath("$.error.message").value("FORBIDDEN"));
+
+            verify(enrollmentService, never()).cancel(any(), any());
+        }
+
+        @Test
+        @DisplayName("서비스가 ENROLLMENT_NOT_FOUND를 던지면 404와 해당 에러 코드를 반환한다")
+        void cancel_notFound() throws Exception {
+            given(enrollmentService.cancel(eq(USER_ID), eq(ENROLLMENT_ID)))
+                    .willThrow(new BusinessException(ErrorCode.ENROLLMENT_NOT_FOUND));
+
+            mockMvc.perform(post("/enrollments/{enrollmentId}/cancel", ENROLLMENT_ID)
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value(404))
+                    .andExpect(jsonPath("$.error.code").value(340401))
+                    .andExpect(jsonPath("$.error.message").value("ENROLLMENT_NOT_FOUND"));
+        }
+
+        @Test
+        @DisplayName("서비스가 INVALID_STATUS_FOR_CANCEL을 던지면 409와 해당 에러 코드를 반환한다")
+        void cancel_invalidStatus() throws Exception {
+            given(enrollmentService.cancel(eq(USER_ID), eq(ENROLLMENT_ID)))
+                    .willThrow(new BusinessException(ErrorCode.INVALID_STATUS_FOR_CANCEL));
+
+            mockMvc.perform(post("/enrollments/{enrollmentId}/cancel", ENROLLMENT_ID)
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value(409))
+                    .andExpect(jsonPath("$.error.code").value(340905))
+                    .andExpect(jsonPath("$.error.message").value("INVALID_STATUS_FOR_CANCEL"));
+        }
+
+        @Test
+        @DisplayName("서비스가 REFUND_WINDOW_EXPIRED를 던지면 409와 해당 에러 코드를 반환한다")
+        void cancel_refundWindowExpired() throws Exception {
+            given(enrollmentService.cancel(eq(USER_ID), eq(ENROLLMENT_ID)))
+                    .willThrow(new BusinessException(ErrorCode.REFUND_WINDOW_EXPIRED));
+
+            mockMvc.perform(post("/enrollments/{enrollmentId}/cancel", ENROLLMENT_ID)
+                            .header("X-User-Id", USER_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value(409))
+                    .andExpect(jsonPath("$.error.code").value(340906))
+                    .andExpect(jsonPath("$.error.message").value("REFUND_WINDOW_EXPIRED"));
+        }
+
+        @Test
+        @DisplayName("인증 헤더가 누락되면 기존 핸들러가 USER_NOT_FOUND로 변환해 응답한다")
+        void cancel_missingAuthHeader() throws Exception {
+            mockMvc.perform(post("/enrollments/{enrollmentId}/cancel", ENROLLMENT_ID)
+                            .header("X-User-Role", "ROLE_USER"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error.code").value(140003))
+                    .andExpect(jsonPath("$.error.message").value("USER_NOT_FOUND"));
+
+            verify(enrollmentService, never()).cancel(any(), any());
+        }
+    }
 }
