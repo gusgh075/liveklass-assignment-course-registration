@@ -120,17 +120,48 @@ public class CourseService {
     }
 
     /**
-     * 강의 상태를 변경한다(미구현 스텁).
+     * 크리에이터가 자신의 강의를 오픈하거나 마감한다.
      *
-     * <p>실제 전이 규칙과 응답 집계는 후속 단계에서 채운다.
+     * <p>강의를 조회해 요청자가 작성자 본인인지 확인한 뒤, 현재 상태에서 목표 상태로의 전이가 적법한지
+     * 검사한다. 허용하는 전이는 오픈({@code DRAFT → OPEN})과 마감({@code OPEN → CLOSED})뿐이며, 그
+     * 밖의 모든 전이는 거부한다. 오픈하려는 강의의 종료일이 이미 지났다면 모집을 시작할 수 없으므로
+     * 함께 막는다.
      *
-     * @param userId   요청자의 외부 식별자
+     * <p>전이가 반영된 강의는 더티 체킹으로 영속화되며, 응답에는 상세 조회와 동일하게 활성 신청 인원
+     * ({@link EnrollmentStatus#PENDING}+{@link EnrollmentStatus#CONFIRMED})과 대기열 인원을 합쳐 담는다.
+     *
+     * @param userId   요청자의 외부 식별자({@code X-User-Id} 헤더 값)
      * @param courseId 상태를 변경할 강의 식별자
-     * @param target   전이 목표 상태
-     * @return 상태 변경 후 강의 상세 응답
+     * @param target   전이 목표 상태({@code OPEN} 또는 {@code CLOSED})
+     * @return 상태 변경이 반영된 강의의 상세 응답
+     * @throws BusinessException 강의가 없으면 {@link ErrorCode#COURSE_NOT_FOUND},
+     *                           요청자가 작성자가 아니면 {@link ErrorCode#COURSE_NOT_OWNED},
+     *                           허용되지 않은 전이면 {@link ErrorCode#COURSE_ILLEGAL_TRANSITION},
+     *                           오픈 시점에 종료일이 이미 지났으면 {@link ErrorCode#COURSE_ENDED}
      */
     public CourseDetailResponse changeStatus(String userId, Long courseId, CourseStatus target) {
-        throw new UnsupportedOperationException("not implemented");
+        Course course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
+
+        if (!course.getCreator().getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.COURSE_NOT_OWNED);
+        }
+
+        CourseStatus current = course.getStatus();
+        if (current == CourseStatus.DRAFT && target == CourseStatus.OPEN) {
+            if (course.getEndDate().isBefore(LocalDateTime.now(clock))) {
+                throw new BusinessException(ErrorCode.COURSE_ENDED);
+            }
+            course.open();
+        } else if (current == CourseStatus.OPEN && target == CourseStatus.CLOSED) {
+            course.close();
+        } else {
+            throw new BusinessException(ErrorCode.COURSE_ILLEGAL_TRANSITION);
+        }
+
+        int enrolledCount = enrollmentRepository.countByCourseAndStatusIn(course, ACTIVE_STATUSES);
+        int waitingCount = waitlistRepository.countByCourse(course);
+        return CourseDetailResponse.from(course, enrolledCount, waitingCount);
     }
 
     /**
